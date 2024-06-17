@@ -67,11 +67,29 @@ change_locale() {
     echo "Idioma do sistema alterado para $new_locale com sucesso! 🎉"
 
     if ask "Deseja alterar o repositório de pacotes para o mais próximo baseado no idioma selecionado?"; then
-        echo "Alterando repositório de pacotes para o mais próximo..."
-        sed -i "s|deb http://deb.debian.org/debian/.*|deb $new_repo $(lsb_release -sc) main contrib non-free|" /etc/apt/sources.list
-        sed -i "s|deb-src http://deb.debian.org/debian/.*|deb-src $new_repo $(lsb_release -sc) main contrib non-free|" /etc/apt/sources.list
+        echo "Alterando repositório de pacotes para o mais próximo e ativando o componente non-free..."
+        
+        # Remove todos os repositórios existentes
+        sed -i '/^deb .*debian.org\/debian/d' /etc/apt/sources.list
+        sed -i '/^deb-src .*debian.org\/debian/d' /etc/apt/sources.list
+
+        # Adiciona os novos repositórios ao sources.list
+        cat <<EOF > /etc/apt/sources.list
+deb $new_repo bullseye main contrib non-free
+deb-src $new_repo bullseye main contrib non-free
+
+deb $new_repo-security bullseye-security main contrib non-free
+deb-src $new_repo-security bullseye-security main contrib non-free
+
+deb $new_repo bullseye-updates main contrib non-free
+deb-src $new_repo bullseye-updates main contrib non-free
+
+deb $new_repo bullseye-backports main contrib non-free
+deb-src $new_repo bullseye-backports main contrib non-free
+EOF
+
         apt update > /dev/null 2>&1
-        echo "Repositório de pacotes alterado com sucesso! 📦"
+        echo "Repositório de pacotes alterado para o mais próximo com sucesso e componente non-free ativado! 📦"
     fi
 }
 
