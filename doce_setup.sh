@@ -179,15 +179,19 @@ mariadb_installed=false
 if $apache_installed && ask "🗄️ Deseja instalar o MariaDB?"; then
     echo "Instalando dependências do MariaDB..."
     apt install -y software-properties-common dirmngr > /dev/null 2>&1
-    echo "Instalando MariaDB..."
     apt install -y mariadb-server mariadb-client > /dev/null 2>&1
 
-    if command -v mysql_secure_installation >/dev/null 2>&1; then
-        echo "Por favor, digite a senha do root para o MariaDB:"
-        read -s mariadb_root_password
+    # Certifique-se de que mysql_secure_installation esteja disponível
+    if ! command -v mysql_secure_installation &> /dev/null; then
+        echo "Erro: mysql_secure_installation não encontrado, instalando MariaDB novamente."
+        apt install -y mariadb-server mariadb-client > /dev/null 2>&1
+    fi
 
-        echo "Configurando MariaDB..."
-        mysql_secure_installation <<EOF | grep -v 'Enter current password for root' > /dev/null 2>&1
+    echo "Por favor, digite a senha do root para o MariaDB:"
+    read -s mariadb_root_password
+
+    echo "Configurando MariaDB..."
+    mysql_secure_installation <<EOF | grep -v 'Enter current password for root' > /dev/null 2>&1
 Y
 n
 Y
@@ -196,35 +200,32 @@ Y
 Y
 EOF
 
-        echo "Aplicando senha de root ao MariaDB e ajustando configurações..."
-        mysql -u root -e "SET PASSWORD FOR root@localhost = PASSWORD('$mariadb_root_password');" 2>/dev/null
-        mysql -u root -p$mariadb_root_password -e "DELETE FROM mysql.user WHERE User='';" 2>/dev/null
-        mysql -u root -p$mariadb_root_password -e "DROP DATABASE IF EXISTS test;" 2>/dev/null
-        mysql -u root -p$mariadb_root_password -e "FLUSH PRIVILEGES;" 2>/dev/null
+    echo "Aplicando senha de root ao MariaDB e ajustando configurações..."
+    mysql -u root -e "SET PASSWORD FOR root@localhost = PASSWORD('$mariadb_root_password');" 2>/dev/null
+    mysql -u root -p$mariadb_root_password -e "DELETE FROM mysql.user WHERE User='';" 2>/dev/null
+    mysql -u root -p$mariadb_root_password -e "DROP DATABASE IF EXISTS test;" 2>/dev/null
+    mysql -u root -p$mariadb_root_password -e "FLUSH PRIVILEGES;" 2>/dev/null
 
-        # Verificar se o arquivo de configuração do MariaDB existe antes de modificá-lo
-        config_file="/etc/mysql/mariadb.conf.d/50-server.cnf"
-        if [ -f "$config_file" ]; then
-            echo "Desativando o modo estrito no MariaDB..."
-            if grep -q "^[#]*\s*sql_mode" "$config_file"; then
-                sed -i "s/^[#]*\s*sql_mode.*/sql_mode = \"\"/" "$config_file"
-            else
-                if grep -q "\[mysqld\]" "$config_file"; then
-                    sed -i "/\[mysqld\]/a sql_mode = \"\"" "$config_file"
-                else
-                    echo "[mysqld]" >> "$config_file"
-                    echo "sql_mode = \"\"" >> "$config_file"
-                fi
-            fi
-            systemctl restart mariadb > /dev/null 2>&1
+    # Verificar se o arquivo de configuração do MariaDB existe antes de modificá-lo
+    config_file="/etc/mysql/mariadb.conf.d/50-server.cnf"
+    if [ -f "$config_file" ]; then
+        echo "Desativando o modo estrito no MariaDB..."
+        if grep -q "^[#]*\s*sql_mode" "$config_file"; then
+            sed -i "s/^[#]*\s*sql_mode.*/sql_mode = \"\"/" "$config_file"
         else
-            echo "Arquivo de configuração do MariaDB não encontrado: $config_file"
+            if grep -q "\[mysqld\]" "$config_file"; then
+                sed -i "/\[mysqld\]/a sql_mode = \"\"" "$config_file"
+            else
+                echo "[mysqld]" >> "$config_file"
+                echo "sql_mode = \"\"" >> "$config_file"
+            fi
         fi
-
-        mariadb_installed=true
+        systemctl restart mariadb > /dev/null 2>&1
     else
-        echo "mysql_secure_installation não encontrado. Pulando a configuração segura do MariaDB."
+        echo "Arquivo de configuração do MariaDB não encontrado: $config_file"
     fi
+
+    mariadb_installed=true
 fi
 
 # Instalar phpMyAdmin
