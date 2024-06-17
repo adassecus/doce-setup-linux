@@ -120,9 +120,10 @@ fi
 # Aumentar o limite de timeout do SSH
 if ask "⏳ Deseja aumentar o limite de timeout do SSH para 5 horas?"; then
     echo "Aumentando o limite de timeout do SSH para 5 horas..."
-    update_config /etc/ssh/sshd_config "ClientAliveInterval" "18000"
-    update_config /etc/ssh/sshd_config "ClientAliveCountMax" "3"
+    update_config /etc/ssh/sshd_config "ClientAliveInterval" "290"
+    update_config /etc/ssh/sshd_config "ClientAliveCountMax" "63"
     service ssh restart > /dev/null 2>&1
+    echo "Limite de timeout do SSH aumentado para 5 horas com sucesso! ⏳"
 fi
 
 # Criar memória swap
