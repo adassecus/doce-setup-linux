@@ -7,7 +7,7 @@ echo "Por favor, responda às perguntas para configurar o servidor de forma fác
 ask() {
     while true; do
         echo -n "$1 (y/n): "
-        read -r yn < /dev/tty  # Redirecionar a leitura para o terminal (tty)
+        read -r yn < /dev/tty
         case $yn in
             [Yy]* ) return 0;;
             [Nn]* ) return 1;;
