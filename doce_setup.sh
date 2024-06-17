@@ -113,7 +113,7 @@ if [ -z "$(swapon --show)" ]; then
         echo "Digite o tamanho da memória swap (por exemplo, 4G para 4 Gigabytes, lembre-se de usar 'G' maiúsculo):"
         read swap_size
         swap_size=$(echo "$swap_size" | tr '[:lower:]' '[:upper:]')
-        if [ -z "$swap_size" ]; então
+        if [ -z "$swap_size" ]; then
             swap_size="4G"
         fi
         echo "Criando memória swap de $swap_size..."
@@ -121,7 +121,7 @@ if [ -z "$(swapon --show)" ]; then
         chmod 600 /swapfile
         mkswap /swapfile > /dev/null 2>&1
         swapon /swapfile
-        if grep -q '/swapfile' /etc/fstab; então
+        if grep -q '/swapfile' /etc/fstab; then
             sed -i 's|.*swapfile.*|/swapfile none swap sw 0 0|' /etc/fstab
         else
             echo '/swapfile none swap sw 0 0' >> /etc/fstab
@@ -133,14 +133,14 @@ else
 fi
 
 # Configurar adaptador de rede
-if ask "🌐 Deseja otimizar o adaptador de rede para melhorar o desempenho? Isso inclui ajustar a velocidade, configurar o duplex e ajustar outros parâmetros de rede."; então
+if ask "🌐 Deseja otimizar o adaptador de rede para melhorar o desempenho? Isso inclui ajustar a velocidade, configurar o duplex e ajustar outros parâmetros de rede."; then
     echo "Configurando o adaptador de rede para melhor desempenho..."
-    for iface em $(ls /sys/class/net/ | grep -v lo); do
-        if [ ! -f "/etc/network/interfaces.d/$iface" ]; então
+    for iface in $(ls /sys/class/net/ | grep -v lo); do
+        if [ ! -f "/etc/network/interfaces.d/$iface" ]; then
             touch "/etc/network/interfaces.d/$iface"
         fi
         ethtool -s $iface speed 1000 duplex full autoneg on > /dev/null 2>&1
-        if ! grep -q "options $iface txqueuelen=1000" /etc/network/interfaces.d/$iface; então
+        if ! grep -q "options $iface txqueuelen=1000" /etc/network/interfaces.d/$iface; then
             echo "options $iface txqueuelen=1000" >> /etc/network/interfaces.d/$iface
         fi
         ifconfig $iface txqueuelen 1000 > /dev/null 2>&1
@@ -153,7 +153,7 @@ if ask "🌐 Deseja otimizar o adaptador de rede para melhorar o desempenho? Iss
 fi
 
 # Ativar arquitetura 32 bits
-if ask "🏗️ Deseja ativar a arquitetura 32 bits?"; então
+if ask "🏗️ Deseja ativar a arquitetura 32 bits?"; then
     echo "Ativando arquitetura 32 bits..."
     dpkg --add-architecture i386
     apt update > /dev/null 2>&1
@@ -163,7 +163,7 @@ fi
 
 # Instalar Apache
 apache_installed=false
-if ask "🌐 Deseja instalar o Apache? Isso é necessário para instalar o MariaDB e o phpMyAdmin posteriormente."; então
+if ask "🌐 Deseja instalar o Apache? Isso é necessário para instalar o MariaDB e o phpMyAdmin posteriormente."; then
     echo "Instalando dependências do Apache..."
     apt install -y apt-transport-https ca-certificates curl software-properties-common > /dev/null 2>&1
     echo "Instalando Apache..."
@@ -176,17 +176,18 @@ fi
 
 # Instalar MariaDB
 mariadb_installed=false
-if $apache_installed && ask "🗄️ Deseja instalar o MariaDB?"; então
+if $apache_installed && ask "🗄️ Deseja instalar o MariaDB?"; then
     echo "Instalando dependências do MariaDB..."
     apt install -y software-properties-common dirmngr > /dev/null 2>&1
     echo "Instalando MariaDB..."
     apt install -y mariadb-server mariadb-client > /dev/null 2>&1
 
-    echo "Por favor, digite a senha do root para o MariaDB:"
-    read -s mariadb_root_password
+    if command -v mysql_secure_installation >/dev/null 2>&1; then
+        echo "Por favor, digite a senha do root para o MariaDB:"
+        read -s mariadb_root_password
 
-    echo "Configurando MariaDB..."
-    mysql_secure_installation <<EOF | grep -v 'Enter current password for root' > /dev/null 2>&1
+        echo "Configurando MariaDB..."
+        mysql_secure_installation <<EOF | grep -v 'Enter current password for root' > /dev/null 2>&1
 Y
 n
 Y
@@ -195,36 +196,39 @@ Y
 Y
 EOF
 
-    echo "Aplicando senha de root ao MariaDB e ajustando configurações..."
-    mysql -u root -e "SET PASSWORD FOR root@localhost = PASSWORD('$mariadb_root_password');" 2>/dev/null
-    mysql -u root -p$mariadb_root_password -e "DELETE FROM mysql.user WHERE User='';" 2>/dev/null
-    mysql -u root -p$mariadb_root_password -e "DROP DATABASE IF EXISTS test;" 2>/dev/null
-    mysql -u root -p$mariadb_root_password -e "FLUSH PRIVILEGES;" 2>/dev/null
+        echo "Aplicando senha de root ao MariaDB e ajustando configurações..."
+        mysql -u root -e "SET PASSWORD FOR root@localhost = PASSWORD('$mariadb_root_password');" 2>/dev/null
+        mysql -u root -p$mariadb_root_password -e "DELETE FROM mysql.user WHERE User='';" 2>/dev/null
+        mysql -u root -p$mariadb_root_password -e "DROP DATABASE IF EXISTS test;" 2>/dev/null
+        mysql -u root -p$mariadb_root_password -e "FLUSH PRIVILEGES;" 2>/dev/null
 
-    # Verificar se o arquivo de configuração do MariaDB existe antes de modificá-lo
-    config_file="/etc/mysql/mariadb.conf.d/50-server.cnf"
-    if [ -f "$config_file" ]; então
-        echo "Desativando o modo estrito no MariaDB..."
-        if grep -q "^[#]*\s*sql_mode" "$config_file"; então
-            sed -i "s/^[#]*\s*sql_mode.*/sql_mode = \"\"/" "$config_file"
-        else
-            if grep -q "\[mysqld\]" "$config_file"; então
-                sed -i "/\[mysqld\]/a sql_mode = \"\"" "$config_file"
+        # Verificar se o arquivo de configuração do MariaDB existe antes de modificá-lo
+        config_file="/etc/mysql/mariadb.conf.d/50-server.cnf"
+        if [ -f "$config_file" ]; then
+            echo "Desativando o modo estrito no MariaDB..."
+            if grep -q "^[#]*\s*sql_mode" "$config_file"; then
+                sed -i "s/^[#]*\s*sql_mode.*/sql_mode = \"\"/" "$config_file"
             else
-                echo "[mysqld]" >> "$config_file"
-                echo "sql_mode = \"\"" >> "$config_file"
+                if grep -q "\[mysqld\]" "$config_file"; then
+                    sed -i "/\[mysqld\]/a sql_mode = \"\"" "$config_file"
+                else
+                    echo "[mysqld]" >> "$config_file"
+                    echo "sql_mode = \"\"" >> "$config_file"
+                fi
             fi
+            systemctl restart mariadb > /dev/null 2>&1
+        else
+            echo "Arquivo de configuração do MariaDB não encontrado: $config_file"
         fi
-        systemctl restart mariadb > /dev/null 2>&1
-    else
-        echo "Arquivo de configuração do MariaDB não encontrado: $config_file"
-    fi
 
-    mariadb_installed=true
+        mariadb_installed=true
+    else
+        echo "mysql_secure_installation não encontrado. Pulando a configuração segura do MariaDB."
+    fi
 fi
 
 # Instalar phpMyAdmin
-if $apache_installed && $mariadb_installed && ask "🌐 Deseja instalar o phpMyAdmin?"; então
+if $apache_installed && $mariadb_installed && ask "🌐 Deseja instalar o phpMyAdmin?"; then
     echo "Instalando dependências do phpMyAdmin..."
     apt install -y php libapache2-mod-php php-mysql php-json php-pear php-mbstring > /dev/null 2>&1
     echo "Instalando phpMyAdmin..."
@@ -244,12 +248,12 @@ if $apache_installed && $mariadb_installed && ask "🌐 Deseja instalar o phpMyA
 fi
 
 # Alterar o idioma do sistema
-if ask "🌍 Deseja alterar o idioma do sistema?"; então
+if ask "🌍 Deseja alterar o idioma do sistema?"; then
     change_locale
 fi
 
 # Opção de reiniciar o servidor
-if ask "🔄 Deseja reiniciar o servidor agora para aplicar todas as alterações?"; então
+if ask "🔄 Deseja reiniciar o servidor agora para aplicar todas as alterações?"; then
     echo "Reiniciando o servidor..."
     echo "Após reiniciar, acesse o servidor utilizando a nova porta SSH, se alterada."
     reboot
