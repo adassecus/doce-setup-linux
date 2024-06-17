@@ -63,20 +63,13 @@ change_locale() {
     echo "Configurando o idioma do sistema para $new_locale..."
     sed -i "/$new_locale/ s/^#//g" /etc/locale.gen
     locale-gen > /dev/null 2>&1
-    update-locale LANG=$new_locale
-    update-locale LANGUAGE=$new_locale
-    update-locale LC_ALL=$new_locale
+    update-locale LANG=$new_locale LANGUAGE=$new_locale LC_ALL=$new_locale
     echo "Idioma do sistema alterado para $new_locale com sucesso! 🎉"
 
     if ask "Deseja alterar o repositório de pacotes para o mais próximo baseado no idioma selecionado?"; then
         echo "Alterando repositório de pacotes para o mais próximo..."
-        if grep -q 'deb http://deb.debian.org/debian/' /etc/apt/sources.list; then
-            sed -i "s|deb http://deb.debian.org/debian/.*|deb $new_repo $(lsb_release -sc) main contrib non-free|" /etc/apt/sources.list
-            sed -i "s|deb-src http://deb.debian.org/debian/.*|deb-src $new_repo $(lsb_release -sc) main contrib non-free|" /etc/apt/sources.list
-        else
-            echo "deb $new_repo $(lsb_release -sc) main contrib non-free" >> /etc/apt/sources.list
-            echo "deb-src $new_repo $(lsb_release -sc) main contrib non-free" >> /etc/apt/sources.list
-        fi
+        sed -i "s|deb http://deb.debian.org/debian/.*|deb $new_repo $(lsb_release -sc) main contrib non-free|" /etc/apt/sources.list
+        sed -i "s|deb-src http://deb.debian.org/debian/.*|deb-src $new_repo $(lsb_release -sc) main contrib non-free|" /etc/apt/sources.list
         apt update > /dev/null 2>&1
         echo "Repositório de pacotes alterado com sucesso! 📦"
     fi
