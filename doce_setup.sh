@@ -94,7 +94,7 @@ fi
 if ask "🔧 Deseja alterar a porta do SSH?"; then
     echo "Digite a nova porta do SSH:"
     read new_port
-    echo "Alterando a porta do SSH..."
+    echo "Alterando a porta do SSH para $new_port..."
     update_config /etc/ssh/sshd_config "Port" "$new_port"
     service ssh restart > /dev/null 2>&1
 fi
@@ -102,8 +102,8 @@ fi
 # Aumentar o limite de timeout do SSH
 if ask "⏳ Deseja aumentar o limite de timeout do SSH para 5 horas?"; then
     echo "Aumentando o limite de timeout do SSH para 5 horas..."
-    update_config /etc/ssh/sshd_config "ClientAliveInterval" "290"
-    update_config /etc/ssh/sshd_config "ClientAliveCountMax" "62"
+    update_config /etc/ssh/sshd_config "ClientAliveInterval" "18000"
+    update_config /etc/ssh/sshd_config "ClientAliveCountMax" "3"
     service ssh restart > /dev/null 2>&1
 fi
 
@@ -133,7 +133,7 @@ else
 fi
 
 # Configurar adaptador de rede
-if ask "🌐 Deseja otimizar o adaptador de rede para melhorar o desempenho? Isso inclui ajustar a velocidade, configurar o duplex e ajustar outros parâmetros de rede."; then
+if ask "🌐 Deseja otimizar o adaptador de rede para melhorar o desempenho?"; then
     echo "Configurando o adaptador de rede para melhor desempenho..."
     for iface in $(ls /sys/class/net/ | grep -v lo); do
         if [ ! -f "/etc/network/interfaces.d/$iface" ]; then
