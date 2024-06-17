@@ -220,6 +220,7 @@ EOF
                 echo "sql_mode = \"\"" >> "$config_file"
             fi
         fi
+		echo "MariaDB instalado e configurado com sucesso!"
         systemctl restart mariadb > /dev/null 2>&1
     else
         echo "Arquivo de configuração do MariaDB não encontrado: $config_file"
