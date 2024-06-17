@@ -19,11 +19,11 @@ Baixe o script DoceSetup diretamente do GitHub usando `wget`.
   wget -O doce_setup.sh https://raw.githubusercontent.com/uouwm/doce-setup-linux/main/doce_setup.sh
   ```
 
-### Passo 3: Dar Permissão de Execução
+### Passo 3: Dar Permissão
 
-Dê permissão de execução ao script baixado:
+Dê permissão ao script baixado:
 ```bash
-chmod +x doce_setup.sh
+chmod 777 doce_setup.sh
 ```
 
 ### Passo 4: Executar o Script
