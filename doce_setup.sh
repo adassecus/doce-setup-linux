@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "🍬 Bem-vindo ao DoceSetup - Seu Assistente de Configuração do Debian 11 Server!"
+echo "🍬 Bem-vindo ao DoceSetup - Seu Assistente de Configuração do Debian Server!"
 echo "Por favor, responda às perguntas para configurar o servidor de forma fácil e rápida."
 
 # Função para fazer perguntas e capturar respostas
@@ -64,6 +64,8 @@ change_locale() {
     sed -i "/$new_locale/ s/^#//g" /etc/locale.gen
     locale-gen > /dev/null 2>&1
     update-locale LANG=$new_locale
+    update-locale LANGUAGE=$new_locale
+    update-locale LC_ALL=$new_locale
     echo "Idioma do sistema alterado para $new_locale com sucesso! 🎉"
 
     if ask "Deseja alterar o repositório de pacotes para o mais próximo baseado no idioma selecionado?"; then
@@ -107,8 +109,8 @@ fi
 # Aumentar o limite de timeout do SSH
 if ask "⏳ Deseja aumentar o limite de timeout do SSH para 5 horas?"; then
     echo "Aumentando o limite de timeout do SSH para 5 horas..."
-    update_config /etc/ssh/sshd_config "ClientAliveInterval" "18000"
-    update_config /etc/ssh/sshd_config "ClientAliveCountMax" "3"
+    update_config /etc/ssh/sshd_config "ClientAliveInterval" "290"
+    update_config /etc/ssh/sshd_config "ClientAliveCountMax" "62"
     service ssh restart > /dev/null 2>&1
 fi
 
@@ -206,20 +208,24 @@ EOF
     mysql -u root -p$mariadb_root_password -e "DROP DATABASE IF EXISTS test;" 2>/dev/null
     mysql -u root -p$mariadb_root_password -e "FLUSH PRIVILEGES;" 2>/dev/null
 
-    # Desativar modo estrito no MariaDB
-    echo "Desativando o modo estrito no MariaDB..."
+    # Verificar se o arquivo de configuração do MariaDB existe antes de modificá-lo
     config_file="/etc/mysql/mariadb.conf.d/50-server.cnf"
-    if grep -q "^[#]*\s*sql_mode" "$config_file"; then
-        sed -i "s/^[#]*\s*sql_mode.*/sql_mode = \"\"/" "$config_file"
-    else
-        if grep -q "\[mysqld\]" "$config_file"; then
-            sed -i "/\[mysqld\]/a sql_mode = \"\"" "$config_file"
+    if [ -f "$config_file" ]; then
+        echo "Desativando o modo estrito no MariaDB..."
+        if grep -q "^[#]*\s*sql_mode" "$config_file"; then
+            sed -i "s/^[#]*\s*sql_mode.*/sql_mode = \"\"/" "$config_file"
         else
-            echo "[mysqld]" >> "$config_file"
-            echo "sql_mode = \"\"" >> "$config_file"
+            if grep -q "\[mysqld\]" "$config_file"; then
+                sed -i "/\[mysqld\]/a sql_mode = \"\"" "$config_file"
+            else
+                echo "[mysqld]" >> "$config_file"
+                echo "sql_mode = \"\"" >> "$config_file"
+            fi
         fi
+        systemctl restart mariadb > /dev/null 2>&1
+    else
+        echo "Arquivo de configuração do MariaDB não encontrado: $config_file"
     fi
-    systemctl restart mariadb > /dev/null 2>&1
 
     mariadb_installed=true
 fi
@@ -256,7 +262,7 @@ if ask "🔄 Deseja reiniciar o servidor agora para aplicar todas as alteraçõe
     reboot
 else
     echo "As alterações serão aplicadas na próxima reinicialização."
-	echo "Após reiniciar, acesse o servidor utilizando a nova porta SSH, se alterada."
+    echo "Após reiniciar, acesse o servidor utilizando a nova porta SSH, se alterada."
 fi
 
 echo "Configuração inicial do servidor concluída! Obrigado por usar o DoceSetup! 🍬"
