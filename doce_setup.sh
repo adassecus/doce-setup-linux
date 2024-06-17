@@ -6,7 +6,8 @@ echo "Por favor, responda às perguntas para configurar o servidor de forma fác
 # Função para fazer perguntas e capturar respostas
 ask() {
     while true; do
-        read -p "$1 (y/n): " yn
+        echo -n "$1 (y/n): "
+        read -r yn < /dev/tty  # Redirecionar a leitura para o terminal (tty)
         case $yn in
             [Yy]* ) return 0;;
             [Nn]* ) return 1;;
@@ -251,9 +252,11 @@ fi
 # Opção de reiniciar o servidor
 if ask "🔄 Deseja reiniciar o servidor agora para aplicar todas as alterações?"; then
     echo "Reiniciando o servidor..."
+    echo "Após reiniciar, acesse o servidor utilizando a nova porta SSH, se alterada."
     reboot
 else
     echo "As alterações serão aplicadas na próxima reinicialização."
+	echo "Após reiniciar, acesse o servidor utilizando a nova porta SSH, se alterada."
 fi
 
 echo "Configuração inicial do servidor concluída! Obrigado por usar o DoceSetup! 🍬"
