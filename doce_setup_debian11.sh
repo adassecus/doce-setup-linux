@@ -447,8 +447,17 @@ if $apache_installed && ask "🗄️ Deseja instalar o MariaDB?"; then
     echo "Iniciando o serviço MariaDB..."
     systemctl start mariadb > /dev/null 2>&1
 
+    # Adicionar uma pausa para garantir que o serviço tenha tempo de iniciar
+    sleep 5
+
+    if ! systemctl is-active --quiet mariadb; then
+	    echo "Aguarde, serviço MariaDB iniciando..."
+        sleep 5
+    fi
+	
     if ! systemctl is-active --quiet mariadb; then
         echo "Erro: não foi possível iniciar o serviço MariaDB."
+        journalctl -xe | tail -n 10
         exit 1
     fi
 
@@ -503,6 +512,7 @@ EOF
 
         if ! systemctl is-active --quiet mariadb; then
             echo "Erro: não foi possível reiniciar o serviço MariaDB."
+            journalctl -xe | tail -n 10
             exit 1
         fi
 
