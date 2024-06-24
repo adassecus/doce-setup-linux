@@ -560,7 +560,9 @@ fi
 # Detectar e instalar drivers mais atualizados
 if ask "🔧 Deseja detectar e instalar todos os drivers mais atualizados?"; then
     echo "Configurando repositórios para incluir 'non-free'..."
-    sed -i 's/main/main contrib non-free/g' /etc/apt/sources.list
+    if ! grep -q 'main contrib non-free' /etc/apt/sources.list; then
+        sed -i 's/main/main contrib non-free/g' /etc/apt/sources.list
+    fi
     apt update > /dev/null 2>&1
 
     echo "Instalando ferramentas de detecção de drivers..."
