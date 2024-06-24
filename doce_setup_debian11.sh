@@ -433,14 +433,18 @@ fi
 mariadb_installed=false
 if $apache_installed && ask "🗄️ Deseja instalar o MariaDB?"; then
     echo "Instalando dependências do MariaDB..."
-    apt install -y software-properties-common dirmngr > /dev/null 2>&1
-    apt install -y mariadb-server mariadb-client expect > /dev/null 2>&1
+    apt install -y software-properties-common dirmngr expect > /dev/null 2>&1
+    apt install -y mariadb-server mariadb-client > /dev/null 2>&1
 
     # Certifique-se de que mysql_secure_installation esteja disponível
     if ! command -v mysql_secure_installation &> /dev/null; then
         echo "Erro: mysql_secure_installation não encontrado, instalando MariaDB novamente."
         apt install -y mariadb-server mariadb-client > /dev/null 2>&1
     fi
+
+    # Iniciar o serviço MariaDB e habilitá-lo para iniciar no boot
+    systemctl start mariadb
+    systemctl enable mariadb
 
     echo "Por favor, digite a senha do root para o MariaDB:"
     read -s mariadb_root_password
