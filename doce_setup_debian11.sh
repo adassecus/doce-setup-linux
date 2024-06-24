@@ -441,26 +441,6 @@ if $apache_installed && ask "🗄️ Deseja instalar o MariaDB?"; then
         apt install -y mariadb-server mariadb-client > /dev/null 2>&1
     fi
 
-    echo "Habilitando MariaDB para iniciar no boot..."
-    systemctl enable mariadb > /dev/null 2>&1
-
-    echo "Iniciando o serviço MariaDB..."
-    systemctl start mariadb > /dev/null 2>&1
-
-    # Adicionar uma pausa para garantir que o serviço tenha tempo de iniciar
-    sleep 5
-
-    if ! systemctl is-active --quiet mariadb; then
-        echo "Aguarde, serviço MariaDB iniciando..."
-        sleep 7
-    fi
-	
-    if ! systemctl is-active --quiet mariadb; then
-        echo "Erro: não foi possível iniciar o serviço MariaDB."
-        journalctl -xe | tail -n 10
-        exit 1
-    fi
-
     echo "Por favor, digite a senha do root para o MariaDB:"
     read -s mariadb_root_password
 
@@ -507,6 +487,26 @@ query_cache_size = 64M
 query_cache_limit = 2M
 EOF
 
+        echo "Habilitando MariaDB para iniciar no boot..."
+		systemctl enable mariadb > /dev/null 2>&1
+
+		echo "Iniciando o serviço MariaDB..."
+		systemctl start mariadb > /dev/null 2>&1
+
+		# Adicionar uma pausa para garantir que o serviço tenha tempo de iniciar
+		sleep 5
+
+		if ! systemctl is-active --quiet mariadb; then
+			echo "Aguarde, serviço MariaDB iniciando..."
+			sleep 7
+		fi
+	
+		if ! systemctl is-active --quiet mariadb; then
+			echo "Erro: não foi possível iniciar o serviço MariaDB."
+			journalctl -xe | tail -n 10
+			exit 1
+		fi
+	
         echo "Reiniciando o serviço MariaDB..."
         systemctl restart mariadb > /dev/null 2>&1
 
