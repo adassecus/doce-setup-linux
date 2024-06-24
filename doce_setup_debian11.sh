@@ -434,7 +434,7 @@ mariadb_installed=false
 if $apache_installed && ask "🗄️ Deseja instalar o MariaDB?"; then
     echo "Instalando dependências do MariaDB..."
     apt install -y software-properties-common dirmngr > /dev/null 2>&1
-    apt install -y mariadb-server mariadb-client > /dev/null 2>&1
+    apt install -y mariadb-server mariadb-client expect > /dev/null 2>&1
 
     # Certifique-se de que mysql_secure_installation esteja disponível
     if ! command -v mysql_secure_installation &> /dev/null; then
@@ -444,12 +444,49 @@ if $apache_installed && ask "🗄️ Deseja instalar o MariaDB?"; then
 
     echo "Por favor, digite a senha do root para o MariaDB:"
     read -s mariadb_root_password
+    export MARIADB_ROOT_PASSWORD=$mariadb_root_password
 
     echo "Configurando MariaDB..."
-    yes | mysql_secure_installation 2>&1 | grep -vE 'stty:|Enter current password|Change the root password|New password|Re-enter new password|Reload privilege tables now'
+    cat <<EOF > /tmp/mysql_secure_installation_expect.exp
+#!/usr/bin/expect -f
+
+set timeout 10
+spawn mysql_secure_installation
+
+expect "Enter current password for root (enter for none):"
+send "\r"
+
+expect "Switch to unix_socket authentication"
+send "n\r"
+
+expect "Change the root password?"
+send "Y\r"
+
+expect "New password:"
+send "$env(MARIADB_ROOT_PASSWORD)\r"
+
+expect "Re-enter new password:"
+send "$env(MARIADB_ROOT_PASSWORD)\r"
+
+expect "Remove anonymous users?"
+send "Y\r"
+
+expect "Disallow root login remotely?"
+send "Y\r"
+
+expect "Remove test database and access to it?"
+send "Y\r"
+
+expect "Reload privilege tables now?"
+send "Y\r"
+
+expect eof
+EOF
+
+    expect /tmp/mysql_secure_installation_expect.exp
 
     echo "Aplicando senha de root ao MariaDB e ajustando configurações..."
-    mysql -u root -e "SET PASSWORD FOR root@localhost = PASSWORD('$mariadb_root_password');" 2>/dev/null
+    mysql -u root -p$mariadb_root_password -e "SET PASSWORD FOR root@localhost = PASSWORD('$mariadb_root_password');" 2>/dev/null
     mysql -u root -p$mariadb_root_password -e "DELETE FROM mysql.user WHERE User='';" 2>/dev/null
     mysql -u root -p$mariadb_root_password -e "DROP DATABASE IF EXISTS test;" 2>/dev/null
     mysql -u root -p$mariadb_root_password -e "FLUSH PRIVILEGES;" 2>/dev/null
@@ -475,6 +512,9 @@ if $apache_installed && ask "🗄️ Deseja instalar o MariaDB?"; then
     fi
 
     mariadb_installed=true
+
+    # Remover o script expect após a execução
+    rm /tmp/mysql_secure_installation_expect.exp
 fi
 
 # Instalar phpMyAdmin
