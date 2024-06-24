@@ -436,8 +436,8 @@ if $apache_installed && ask "🗄️ Deseja instalar o MariaDB?"; then
     apt install -y software-properties-common dirmngr expect > /dev/null 2>&1
     apt install -y mariadb-server mariadb-client > /dev/null 2>&1
 
-    if ! command -v mysql_secure_installation &> /dev/null; then
-        echo "Erro: mysql_secure_installation não encontrado, tentando reinstalar o MariaDB."
+    if ! command -v mysql &> /dev/null; then
+        echo "Erro: Cliente MySQL não encontrado, tentando reinstalar o MariaDB."
         apt install -y mariadb-server mariadb-client > /dev/null 2>&1
     fi
 
@@ -456,44 +456,12 @@ if $apache_installed && ask "🗄️ Deseja instalar o MariaDB?"; then
     read -s mariadb_root_password
 
     echo "Configurando MariaDB..."
-    SECURE_MYSQL=$(expect -c "
-   
-    spawn mysql_secure_installation
-
-    expect \"Enter current password for root (enter for none):\"
-    send \"\r\"
-
-    expect \"Set root password?\"
-    send \"Y\r\"
-
-    expect \"New password:\"
-    send \"$mariadb_root_password\r\"
-
-    expect \"Re-enter new password:\"
-    send \"$mariadb_root_password\r\"
-
-    expect \"Remove anonymous users?\"
-    send \"Y\r\"
-
-    expect \"Disallow root login remotely?\"
-    send \"Y\r\"
-
-    expect \"Remove test database and access to it?\"
-    send \"Y\r\"
-
-    expect \"Reload privilege tables now?\"
-    send \"Y\r\"
-
-    expect eof
-    ")
-
-    echo "$SECURE_MYSQL"
-
-    echo "Aplicando senha de root ao MariaDB e ajustando configurações..."
-    mysql -u root -p"$mariadb_root_password" -e "SET PASSWORD FOR root@localhost = PASSWORD('$mariadb_root_password');" 2>/dev/null
-    mysql -u root -p"$mariadb_root_password" -e "DELETE FROM mysql.user WHERE User='';" 2>/dev/null
-    mysql -u root -p"$mariadb_root_password" -e "DROP DATABASE IF EXISTS test;" 2>/dev/null
-    mysql -u root -p"$mariadb_root_password" -e "FLUSH PRIVILEGES;" 2>/dev/null
+    mysql -e "UPDATE mysql.user SET Password = PASSWORD('$mariadb_root_password') WHERE User = 'root';" > /dev/null 2>&1 || { echo "Erro ao configurar a senha do root"; exit 1; }
+    mysql -e "DELETE FROM mysql.user WHERE User='';" > /dev/null 2>&1 || { echo "Erro ao remover usuários anônimos"; exit 1; }
+    mysql -e "DROP DATABASE test;" > /dev/null 2>&1 || { echo "Erro ao remover banco de dados de teste"; exit 1; }
+    mysql -e "UPDATE mysql.user SET plugin = 'mysql_native_password' WHERE User = 'root';" > /dev/null 2>&1 || { echo "Erro ao configurar o plugin de autenticação"; exit 1; }
+    mysql -e "UPDATE mysql.user SET Host = 'localhost' WHERE User = 'root';" > /dev/null 2>&1 || { echo "Erro ao restringir acesso remoto"; exit 1; }
+    mysql -e "FLUSH PRIVILEGES;" > /dev/null 2>&1 || { echo "Erro ao recarregar privilégios"; exit 1; }
 
     # Verificar se o arquivo de configuração do MariaDB existe antes de modificá-lo
     config_file="/etc/mysql/mariadb.conf.d/50-server.cnf"
@@ -509,6 +477,27 @@ if $apache_installed && ask "🗄️ Deseja instalar o MariaDB?"; then
                 echo "sql_mode = \"\"" >> "$config_file"
             fi
         fi
+
+        echo "Adicionando configuração para não permitir acesso remoto..."
+        if grep -q "^[#]*\s*bind-address" "$config_file"; then
+            sed -i "s/^[#]*\s*bind-address.*/bind-address = 127.0.0.1/" "$config_file"
+        else
+            echo "bind-address = 127.0.0.1" >> "$config_file"
+        fi
+
+        echo "Otimizando configurações do MariaDB..."
+        cat <<EOF >> $config_file
+
+# Otimizações de desempenho
+innodb_buffer_pool_size = 1G
+innodb_log_file_size = 256M
+innodb_log_buffer_size = 64M
+innodb_flush_log_at_trx_commit = 1
+innodb_file_per_table = 1
+query_cache_size = 64M
+query_cache_limit = 2M
+EOF
+
         echo "Reiniciando o serviço MariaDB..."
         systemctl restart mariadb > /dev/null 2>&1
 
