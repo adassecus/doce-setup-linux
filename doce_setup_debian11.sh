@@ -446,7 +446,7 @@ if $apache_installed && ask "🗄️ Deseja instalar o MariaDB?"; then
     read -s mariadb_root_password
 
     echo "Configurando MariaDB..."
-    mysql_secure_installation <<EOF | grep -v 'stty:'
+    mysql_secure_installation <<EOF | grep -vE 'stty:|Enter current password|Change the root password|New password|Re-enter new password|Reload privilege tables now'
 Y
 n
 Y
