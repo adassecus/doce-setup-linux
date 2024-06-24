@@ -429,28 +429,37 @@ if ask "🌐 Deseja instalar o Apache? Isso é necessário para instalar o Maria
     apache_installed=true
 fi
 
-# Instalar MariaDB
 mariadb_installed=false
 if $apache_installed && ask "🗄️ Deseja instalar o MariaDB?"; then
     echo "Instalando dependências do MariaDB..."
-    apt install -y software-properties-common dirmngr expect > /dev/null 2>&1
+    apt install -y software-properties-common dirmngr > /dev/null 2>&1
     apt install -y mariadb-server mariadb-client > /dev/null 2>&1
 
-    if ! command -v mysql &> /dev/null; then
-        echo "Erro: Cliente MySQL não encontrado, tentando reinstalar o MariaDB."
+    # Certifique-se de que mysql_secure_installation esteja disponível
+    if ! command -v mysql_secure_installation &> /dev/null; then
+        echo "Erro: mysql_secure_installation não encontrado, instalando MariaDB novamente."
         apt install -y mariadb-server mariadb-client > /dev/null 2>&1
     fi
 
     echo "Por favor, digite a senha do root para o MariaDB:"
     read -s mariadb_root_password
 
+    echo "^ Ignore as mensagens acima ^"
     echo "Configurando MariaDB..."
-    mysql -e "UPDATE mysql.user SET Password = PASSWORD('$mariadb_root_password') WHERE User = 'root';" > /dev/null 2>&1 || { echo "Erro ao configurar a senha do root"; exit 1; }
-    mysql -e "DELETE FROM mysql.user WHERE User='';" > /dev/null 2>&1 || { echo "Erro ao remover usuários anônimos"; exit 1; }
-    mysql -e "DROP DATABASE test;" > /dev/null 2>&1 || { echo "Erro ao remover banco de dados de teste"; exit 1; }
-    mysql -e "UPDATE mysql.user SET plugin = 'mysql_native_password' WHERE User = 'root';" > /dev/null 2>&1 || { echo "Erro ao configurar o plugin de autenticação"; exit 1; }
-    mysql -e "UPDATE mysql.user SET Host = 'localhost' WHERE User = 'root';" > /dev/null 2>&1 || { echo "Erro ao restringir acesso remoto"; exit 1; }
-    mysql -e "FLUSH PRIVILEGES;" > /dev/null 2>&1 || { echo "Erro ao recarregar privilégios"; exit 1; }
+    mysql_secure_installation <<EOF | grep -v 'Enter current password for root' > /dev/null 2>&1
+Y
+n
+Y
+Y
+Y
+Y
+EOF
+
+    echo "Aplicando senha de root ao MariaDB e ajustando configurações..."
+    mysql -u root -e "SET PASSWORD FOR root@localhost = PASSWORD('$mariadb_root_password');" 2>/dev/null
+    mysql -u root -p$mariadb_root_password -e "DELETE FROM mysql.user WHERE User='';" 2>/dev/null
+    mysql -u root -p$mariadb_root_password -e "DROP DATABASE IF EXISTS test;" 2>/dev/null
+    mysql -u root -p$mariadb_root_password -e "FLUSH PRIVILEGES;" 2>/dev/null
 
     # Verificar se o arquivo de configuração do MariaDB existe antes de modificá-lo
     config_file="/etc/mysql/mariadb.conf.d/50-server.cnf"
@@ -467,56 +476,86 @@ if $apache_installed && ask "🗄️ Deseja instalar o MariaDB?"; then
             fi
         fi
 
-        echo "Adicionando configuração para não permitir acesso remoto..."
-        if grep -q "^[#]*\s*bind-address" "$config_file"; then
-            sed -i "s/^[#]*\s*bind-address.*/bind-address = 127.0.0.1/" "$config_file"
+        # Configurações de otimização de desempenho
+        echo "Adicionando otimizações de desempenho ao MariaDB..."
+        if grep -q "innodb_buffer_pool_size" "$config_file"; then
+            sed -i "s/^innodb_buffer_pool_size.*/innodb_buffer_pool_size = 1G/" "$config_file"
         else
-            echo "bind-address = 127.0.0.1" >> "$config_file"
+            sed -i "/\[mysqld\]/a innodb_buffer_pool_size = 1G" "$config_file"
         fi
-
-        echo "Otimizando configurações do MariaDB..."
-        cat <<EOF >> $config_file
-
-# Otimizações de desempenho
-innodb_buffer_pool_size = 1G
-innodb_log_file_size = 256M
-innodb_log_buffer_size = 64M
-innodb_flush_log_at_trx_commit = 1
-innodb_file_per_table = 1
-query_cache_size = 64M
-query_cache_limit = 2M
-EOF
-
-        echo "Habilitando MariaDB para iniciar no boot..."
-		systemctl enable mariadb > /dev/null 2>&1
-
-		echo "Iniciando o serviço MariaDB..."
-		systemctl start mariadb > /dev/null 2>&1
-
-		# Adicionar uma pausa para garantir que o serviço tenha tempo de iniciar
-		sleep 5
-
-		if ! systemctl is-active --quiet mariadb; then
-			echo "Aguarde, serviço MariaDB iniciando..."
-			sleep 7
-		fi
-	
-		if ! systemctl is-active --quiet mariadb; then
-			echo "Erro: não foi possível iniciar o serviço MariaDB."
-			journalctl -xe | tail -n 10
-			exit 1
-		fi
-	
-        echo "Reiniciando o serviço MariaDB..."
-        systemctl restart mariadb > /dev/null 2>&1
-
-        if ! systemctl is-active --quiet mariadb; then
-            echo "Erro: não foi possível reiniciar o serviço MariaDB."
-            journalctl -xe | tail -n 10
-            exit 1
+        if grep -q "innodb_log_file_size" "$config_file"; then
+            sed -i "s/^innodb_log_file_size.*/innodb_log_file_size = 256M/" "$config_file"
+        else
+            sed -i "/\[mysqld\]/a innodb_log_file_size = 256M" "$config_file"
+        fi
+        if grep -q "innodb_file_per_table" "$config_file"; then
+            sed -i "s/^innodb_file_per_table.*/innodb_file_per_table = 1/" "$config_file"
+        else
+            sed -i "/\[mysqld\]/a innodb_file_per_table = 1" "$config_file"
+        fi
+        if grep -q "max_connections" "$config_file"; then
+            sed -i "s/^max_connections.*/max_connections = 200/" "$config_file"
+        else
+            sed -i "/\[mysqld\]/a max_connections = 200" "$config_file"
+        fi
+        if grep -q "query_cache_size" "$config_file"; then
+            sed -i "s/^query_cache_size.*/query_cache_size = 64M/" "$config_file"
+        else
+            sed -i "/\[mysqld\]/a query_cache_size = 64M" "$config_file"
+        fi
+        if grep -q "query_cache_type" "$config_file"; then
+            sed -i "s/^query_cache_type.*/query_cache_type = 1/" "$config_file"
+        else
+            sed -i "/\[mysqld\]/a query_cache_type = 1" "$config_file"
+        fi
+        if grep -q "tmp_table_size" "$config_file"; then
+            sed -i "s/^tmp_table_size.*/tmp_table_size = 64M/" "$config_file"
+        else
+            sed -i "/\[mysqld\]/a tmp_table_size = 64M" "$config_file"
+        fi
+        if grep -q "max_heap_table_size" "$config_file"; then
+            sed -i "s/^max_heap_table_size.*/max_heap_table_size = 64M/" "$config_file"
+        else
+            sed -i "/\[mysqld\]/a max_heap_table_size = 64M" "$config_file"
+        fi
+        if grep -q "thread_cache_size" "$config_file"; then
+            sed -i "s/^thread_cache_size.*/thread_cache_size = 8/" "$config_file"
+        else
+            sed -i "/\[mysqld\]/a thread_cache_size = 8" "$config_file"
+        fi
+        if grep -q "table_open_cache" "$config_file"; then
+            sed -i "s/^table_open_cache.*/table_open_cache = 400/" "$config_file"
+        else
+            sed -i "/\[mysqld\]/a table_open_cache = 400" "$config_file"
+        fi
+        if grep -q "key_buffer_size" "$config_file"; then
+            sed -i "s/^key_buffer_size.*/key_buffer_size = 32M/" "$config_file"
+        else
+            sed -i "/\[mysqld\]/a key_buffer_size = 32M" "$config_file"
+        fi
+        if grep -q "join_buffer_size" "$config_file"; then
+            sed -i "s/^join_buffer_size.*/join_buffer_size = 8M/" "$config_file"
+        else
+            sed -i "/\[mysqld\]/a join_buffer_size = 8M" "$config_file"
+        fi
+        if grep -q "sort_buffer_size" "$config_file"; then
+            sed -i "s/^sort_buffer_size.*/sort_buffer_size = 4M/" "$config_file"
+        else
+            sed -i "/\[mysqld\]/a sort_buffer_size = 4M" "$config_file"
+        fi
+        if grep -q "read_rnd_buffer_size" "$config_file"; then
+            sed -i "s/^read_rnd_buffer_size.*/read_rnd_buffer_size = 4M/" "$config_file"
+        else
+            sed -i "/\[mysqld\]/a read_rnd_buffer_size = 4M" "$config_file"
         fi
 
         echo "MariaDB instalado e configurado com sucesso!"
+
+        # Configurar MariaDB para iniciar com o sistema
+        systemctl enable mariadb
+
+        # Reiniciar o MariaDB para aplicar todas as configurações
+        systemctl restart mariadb
     else
         echo "Arquivo de configuração do MariaDB não encontrado: $config_file"
     fi
