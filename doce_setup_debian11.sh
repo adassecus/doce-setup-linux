@@ -46,7 +46,7 @@ configurar_firewall() {
 
   # Configurar proteção contra SYN Flood
   ufw logging on
-  ufw limit synflood
+  ufw limit synflood > /dev/null 2>&1 || echo "Erro: perfil synflood não encontrado"
 
   ufw enable < /dev/null > /dev/null 2>&1
   ufw reload < /dev/null > /dev/null 2>&1
@@ -595,7 +595,8 @@ if $apache_installed && ask "🔐 Deseja instalar um certificado SSL gratuito co
     read domain
 
     echo "Configurando Certbot para $domain..."
-    certbot --apache -d $domain --email $email --agree-tos --no-eff-email
+    certbot_output=$(certbot --apache -d $domain --email $email --agree-tos --no-eff-email 2>&1)
+    echo "$certbot_output" | grep -v -e 'Saving debug log to' -e 'Plugins selected:' -e 'Account registered.' -e 'Requesting a certificate for' -e 'Performing the following challenges:' -e 'Enabled Apache rewrite module' -e 'Waiting for verification...' -e 'Cleaning up challenges' -e 'Created an SSL vhost at' -e 'Enabled Apache socache_shmcb module' -e 'Enabled Apache ssl module' -e 'Deploying Certificate to VirtualHost' -e 'Enabling available site:' -e 'Enabled Apache rewrite module' -e 'Redirecting vhost in' -e 'Congratulations! You have successfully enabled' -e 'IMPORTANT NOTES:' -e 'Your certificate and chain have been saved at:' -e 'Your key file has been saved at:' -e 'Your certificate will expire on' -e 'To obtain a new or tweaked version of this certificate in the future,' -e 'To non-interactively renew *all* of your certificates,' -e 'If you like Certbot, please consider supporting our work by:'
 
     echo "Configurando renovação automática do certificado SSL..."
     cat <<EOF > /etc/cron.d/certbot
@@ -632,12 +633,12 @@ EOF
 
     echo "Varnish instalado e configurado com sucesso! ⚡"
     # Liberar portas usadas pelo caching no firewall
-    ufw allow 6082/tcp
-    ufw allow 80/tcp
+    ufw allow 6082/tcp > /dev/null 2>&1
+    ufw allow 80/tcp > /dev/null 2>&1
 fi
 
 # Detectar e instalar drivers mais atualizados
-if ask "🔧 Deseja detectar e instalar todos os drivers mais atualizados?"; then
+if ask "🔧 Deseja detectar e instalar todos os drivers atualizados?"; then
     echo "Configurando repositórios para incluir 'non-free'..."
     if ! grep -q 'main contrib non-free' /etc/apt/sources.list; then
         sed -i 's/main/main contrib non-free/g' /etc/apt/sources.list
@@ -647,14 +648,14 @@ if ask "🔧 Deseja detectar e instalar todos os drivers mais atualizados?"; the
     echo "Instalando ferramentas de detecção de drivers..."
     apt install -y pciutils usbutils > /dev/null 2>&1
 
-    echo "Detectando hardware e instalando drivers mais atualizados..."
+    echo "Detectando hardware e instalando drivers atualizados..."
     apt install -y firmware-linux-free firmware-linux-nonfree > /dev/null 2>&1
     apt install -y firmware-misc-nonfree > /dev/null 2>&1
     apt install -y firmware-realtek > /dev/null 2>&1
     apt install -y firmware-iwlwifi > /dev/null 2>&1
     apt install -y intel-microcode > /dev/null 2>&1
 
-    echo "Drivers mais atualizados instalados com sucesso! 🔧"
+    echo "Drivers atualizados instalados com sucesso! 🔧"
 fi
 
 # Configurar sysctl para otimização
