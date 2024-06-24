@@ -436,64 +436,70 @@ if $apache_installed && ask "🗄️ Deseja instalar o MariaDB?"; then
     apt install -y software-properties-common dirmngr expect > /dev/null 2>&1
     apt install -y mariadb-server mariadb-client > /dev/null 2>&1
 
-    # Certifique-se de que mysql_secure_installation esteja disponível
     if ! command -v mysql_secure_installation &> /dev/null; then
-        echo "Erro: mysql_secure_installation não encontrado, instalando MariaDB novamente."
+        echo "Erro: mysql_secure_installation não encontrado, tentando reinstalar o MariaDB."
         apt install -y mariadb-server mariadb-client > /dev/null 2>&1
     fi
 
-    # Iniciar o serviço MariaDB e habilitá-lo para iniciar no boot
-    systemctl start mariadb
-    systemctl enable mariadb
+    echo "Habilitando MariaDB para iniciar no boot..."
+    systemctl enable mariadb > /dev/null 2>&1
+
+    echo "Iniciando o serviço MariaDB..."
+    systemctl start mariadb > /dev/null 2>&1
 
     echo "Por favor, digite a senha do root para o MariaDB:"
     read -s mariadb_root_password
-    export MARIADB_ROOT_PASSWORD=$mariadb_root_password
 
     echo "Configurando MariaDB..."
-    cat <<EOF > /tmp/mysql_secure_installation_expect.exp
-#!/usr/bin/expect -f
+    SECURE_MYSQL=$(expect -c "
+    set timeout 10
+    spawn mysql_secure_installation
 
-set timeout 10
-spawn mysql_secure_installation
+    expect \"Enter current password for root (enter for none):\"
+    send \"\r\"
 
-expect "Enter current password for root (enter for none):"
-send "\r"
+    expect \"Set root password?\"
+    send \"Y\r\"
 
-expect "Switch to unix_socket authentication"
-send "n\r"
+    expect \"New password:\"
+    send \"$mariadb_root_password\r\"
 
-expect "Change the root password?"
-send "Y\r"
+    expect \"Re-enter new password:\"
+    send \"$mariadb_root_password\r\"
 
-expect "New password:"
-send "$env(MARIADB_ROOT_PASSWORD)\r"
+    expect \"Remove anonymous users?\"
+    send \"Y\r\"
 
-expect "Re-enter new password:"
-send "$env(MARIADB_ROOT_PASSWORD)\r"
+    expect \"Disallow root login remotely?\"
+    send \"Y\r\"
 
-expect "Remove anonymous users?"
-send "Y\r"
+    expect \"Remove test database and access to it?\"
+    send \"Y\r\"
 
-expect "Disallow root login remotely?"
-send "Y\r"
+    expect \"Reload privilege tables now?\"
+    send \"Y\r\"
 
-expect "Remove test database and access to it?"
-send "Y\r"
+    expect eof
+    ")
 
-expect "Reload privilege tables now?"
-send "Y\r"
-
-expect eof
-EOF
-
-    expect /tmp/mysql_secure_installation_expect.exp
+    echo "$SECURE_MYSQL"
 
     echo "Aplicando senha de root ao MariaDB e ajustando configurações..."
-    mysql -u root -p$mariadb_root_password -e "SET PASSWORD FOR root@localhost = PASSWORD('$mariadb_root_password');" 2>/dev/null
-    mysql -u root -p$mariadb_root_password -e "DELETE FROM mysql.user WHERE User='';" 2>/dev/null
-    mysql -u root -p$mariadb_root_password -e "DROP DATABASE IF EXISTS test;" 2>/dev/null
-    mysql -u root -p$mariadb_root_password -e "FLUSH PRIVILEGES;" 2>/dev/null
+    if ! mysql -u root -p"$mariadb_root_password" -e "SET PASSWORD FOR root@localhost = PASSWORD('$mariadb_root_password');" 2>/dev/null; then
+        echo "Erro ao aplicar senha de root ao MariaDB"
+    fi
+
+    if ! mysql -u root -p"$mariadb_root_password" -e "DELETE FROM mysql.user WHERE User='';" 2>/dev/null; then
+        echo "Erro ao remover usuários anônimos do MariaDB"
+    fi
+
+    if ! mysql -u root -p"$mariadb_root_password" -e "DROP DATABASE IF EXISTS test;" 2>/dev/null; then
+        echo "Erro ao remover banco de dados de teste do MariaDB"
+    fi
+
+    if ! mysql -u root -p"$mariadb_root_password" -e "FLUSH PRIVILEGES;" 2>/dev/null; then
+        echo "Erro ao recarregar privilégios no MariaDB"
+    fi
 
     # Verificar se o arquivo de configuração do MariaDB existe antes de modificá-lo
     config_file="/etc/mysql/mariadb.conf.d/50-server.cnf"
@@ -509,16 +515,14 @@ EOF
                 echo "sql_mode = \"\"" >> "$config_file"
             fi
         fi
-        echo "MariaDB instalado e configurado com sucesso!"
+        echo "Reiniciando o serviço MariaDB..."
         systemctl restart mariadb > /dev/null 2>&1
+        echo "MariaDB instalado e configurado com sucesso!"
     else
         echo "Arquivo de configuração do MariaDB não encontrado: $config_file"
     fi
 
     mariadb_installed=true
-
-    # Remover o script expect após a execução
-    rm /tmp/mysql_secure_installation_expect.exp
 fi
 
 # Instalar phpMyAdmin
