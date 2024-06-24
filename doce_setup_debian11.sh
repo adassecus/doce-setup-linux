@@ -509,20 +509,24 @@ if $apache_installed && ask "🔐 Deseja instalar um certificado SSL gratuito co
     echo "Instalando Certbot..."
     apt install -y certbot python3-certbot-apache > /dev/null 2>&1
 
-    echo "Por favor, digite seu domínio ou IP (exemplo: seudominio.com ou 192.168.0.1):"
+    echo "Por favor, digite seu domínio (exemplo: seudominio.com):"
     read domain
 
-    echo "Configurando Certbot para $domain..."
-    certbot --apache -d $domain
+    if [[ "$domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "O Let's Encrypt não emite certificados para endereços IP. Por favor, forneça um nome de domínio."
+    else
+        echo "Configurando Certbot para $domain..."
+        certbot --apache -d $domain
 
-    echo "Configurando renovação automática do certificado SSL..."
-    cat <<EOF > /etc/cron.d/certbot
+        echo "Configurando renovação automática do certificado SSL..."
+        cat <<EOF > /etc/cron.d/certbot
 SHELL=/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 0 3 * * * root certbot renew --quiet --deploy-hook "systemctl reload apache2"
 EOF
 
-    echo "Certificado SSL instalado e configurado com sucesso! 🔐"
+        echo "Certificado SSL instalado e configurado com sucesso! 🔐"
+    fi
 fi
 
 # Instalar e configurar Caching
