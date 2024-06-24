@@ -290,20 +290,17 @@ change_locale() {
 
     read -p "Digite o número do idioma escolhido: " lang_choice
 
-    case $lang_choice in
-        1) new_locale="en_US.UTF-8"; new_repo="http://deb.debian.org/debian/";;
-        2) new_locale="es_ES.UTF-8"; new_repo="http://ftp.es.debian.org/debian/";;
-        3) new_locale="fr_FR.UTF-8"; new_repo="http://ftp.fr.debian.org/debian/";;
-        4) new_locale="de_DE.UTF-8"; new_repo="http://ftp.de.debian.org/debian/";;
-        5) new_locale="it_IT.UTF-8"; new_repo="http://ftp.it.debian.org/debian/";;
-        6) new_locale="pt_BR.UTF-8"; new_repo="http://ftp.br.debian.org/debian/";;
-        7) new_locale="ru_RU.UTF-8"; new_repo="http://ftp.ru.debian.org/debian/";;
-        8) new_locale="zh_CN.UTF-8"; new_repo="http://ftp.cn.debian.org/debian/";;
-        9) new_locale="ja_JP.UTF-8"; new_repo="http://ftp.jp.debian.org/debian/";;
-        10) new_locale="ko_KR.UTF-8"; new_repo="http://ftp.kr.debian.org/debian/";;
-        11) new_locale="ar_SA.UTF-8"; new_repo="http://ftp.sa.debian.org/debian/";;
-        *) echo "Escolha inválida. Usando en_US.UTF-8 por padrão."; new_locale="en_US.UTF-8"; new_repo="http://deb.debian.org/debian/";;
-    esac
+    locales=("en_US.UTF-8" "es_ES.UTF-8" "fr_FR.UTF-8" "de_DE.UTF-8" "it_IT.UTF-8" "pt_BR.UTF-8" "ru_RU.UTF-8" "zh_CN.UTF-8" "ja_JP.UTF-8" "ko_KR.UTF-8" "ar_SA.UTF-8")
+    repos=("http://deb.debian.org/debian/" "http://ftp.es.debian.org/debian/" "http://ftp.fr.debian.org/debian/" "http://ftp.de.debian.org/debian/" "http://ftp.it.debian.org/debian/" "http://ftp.br.debian.org/debian/" "http://ftp.ru.debian.org/debian/" "http://ftp.cn.debian.org/debian/" "http://ftp.jp.debian.org/debian/" "http://ftp.kr.debian.org/debian/" "http://ftp.sa.debian.org/debian/")
+
+    if (( lang_choice >= 1 && lang_choice <= 11 )); then
+        new_locale=${locales[$lang_choice-1]}
+        new_repo=${repos[$lang_choice-1]}
+    else
+        echo "Escolha inválida. Usando en_US.UTF-8 por padrão."
+        new_locale="en_US.UTF-8"
+        new_repo="http://deb.debian.org/debian/"
+    fi
 
     echo "Configurando o idioma do sistema para $new_locale..."
     sed -i "/$new_locale/ s/^#//g" /etc/locale.gen
@@ -313,18 +310,18 @@ change_locale() {
 
     if ask "Deseja alterar o repositório de pacotes para o mais próximo baseado no idioma selecionado?"; then
         echo "Alterando repositório de pacotes para o mais próximo e ativando o componente non-free..."
-        
+
         # Remove todos os repositórios existentes
-        sed -i '/^deb .*debian.org\/debian/d' /etc/apt/sources.list
-        sed -i '/^deb-src .*debian.org\/debian/d' /etc/apt/sources.list
+        sed -i '/^deb .*debian.org/d' /etc/apt/sources.list
+        sed -i '/^deb-src .*debian.org/d' /etc/apt/sources.list
 
         # Adiciona os novos repositórios ao sources.list
         cat <<EOF > /etc/apt/sources.list
 deb $new_repo bullseye main contrib non-free
 deb-src $new_repo bullseye main contrib non-free
 
-deb $new_repo-security bullseye-security main contrib non-free
-deb-src $new_repo-security bullseye-security main contrib non-free
+deb http://deb.debian.org/debian-security bullseye-security main contrib non-free
+deb-src http://deb.debian.org/debian-security bullseye-security main contrib non-free
 
 deb $new_repo bullseye-updates main contrib non-free
 deb-src $new_repo bullseye-updates main contrib non-free
@@ -610,7 +607,7 @@ if $apache_installed && $mariadb_installed && ask "🌐 Deseja instalar o phpMyA
     echo "Configuração do phpMyAdmin concluída! 🌐"
     sleep 4
     clear
-	echo "Você pode acessar o phpMyAdmin com o usuário 'root' e a senha do MariaDB."
+    echo "Você pode acessar o phpMyAdmin com o usuário 'root' e a senha do MariaDB."
 fi
 
 # Instalar Certbot e configurar SSL
