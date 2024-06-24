@@ -446,7 +446,7 @@ if $apache_installed && ask "🗄️ Deseja instalar o MariaDB?"; then
     read -s mariadb_root_password
 
     echo "Configurando MariaDB..."
-    mysql_secure_installation <<EOF | grep -v 'Enter current password for root' > /dev/null 2>&1
+    mysql_secure_installation <<EOF | grep -v 'stty:'
 Y
 n
 Y
@@ -509,24 +509,23 @@ if $apache_installed && ask "🔐 Deseja instalar um certificado SSL gratuito co
     echo "Instalando Certbot..."
     apt install -y certbot python3-certbot-apache > /dev/null 2>&1
 
-    echo "Por favor, digite seu domínio (exemplo: seudominio.com):"
+    echo "Por favor, digite seu email para notificações de segurança e renovação do certificado:"
+    read email
+
+    echo "Por favor, digite seu domínio (exemplo: seudominio.com), IP numérico não é permitido:"
     read domain
 
-    if [[ "$domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        echo "O Let's Encrypt não emite certificados para endereços IP. Por favor, forneça um nome de domínio."
-    else
-        echo "Configurando Certbot para $domain..."
-        certbot --apache -d $domain
+    echo "Configurando Certbot para $domain..."
+    certbot --apache -d $domain --email $email --agree-tos --no-eff-email
 
-        echo "Configurando renovação automática do certificado SSL..."
-        cat <<EOF > /etc/cron.d/certbot
+    echo "Configurando renovação automática do certificado SSL..."
+    cat <<EOF > /etc/cron.d/certbot
 SHELL=/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 0 3 * * * root certbot renew --quiet --deploy-hook "systemctl reload apache2"
 EOF
 
-        echo "Certificado SSL instalado e configurado com sucesso! 🔐"
-    fi
+    echo "Certificado SSL instalado e configurado com sucesso! 🔐"
 fi
 
 # Instalar e configurar Caching
