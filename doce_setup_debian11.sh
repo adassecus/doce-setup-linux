@@ -444,7 +444,6 @@ if $apache_installed && ask "🗄️ Deseja instalar o MariaDB?"; then
     echo "Por favor, digite a senha do root para o MariaDB:"
     read -s mariadb_root_password
 
-    echo "^ Ignore as mensagens acima ^"
     echo "Configurando MariaDB..."
     mysql_secure_installation <<EOF | grep -v 'Enter current password for root' > /dev/null 2>&1
 Y
@@ -455,6 +454,7 @@ Y
 Y
 EOF
 
+    echo "^ Ignore as mensagens acima ^"
     echo "Aplicando senha de root ao MariaDB e ajustando configurações..."
     mysql -u root -e "SET PASSWORD FOR root@localhost = PASSWORD('$mariadb_root_password');" 2>/dev/null
     mysql -u root -p$mariadb_root_password -e "DELETE FROM mysql.user WHERE User='';" 2>/dev/null
@@ -552,10 +552,10 @@ EOF
         echo "MariaDB instalado e configurado com sucesso!"
 
         # Configurar MariaDB para iniciar com o sistema
-        systemctl enable mariadb
+        systemctl enable mariadb > /dev/null 2>&1
 
         # Reiniciar o MariaDB para aplicar todas as configurações
-        systemctl restart mariadb
+        systemctl restart mariadb > /dev/null 2>&1
     else
         echo "Arquivo de configuração do MariaDB não encontrado: $config_file"
     fi
