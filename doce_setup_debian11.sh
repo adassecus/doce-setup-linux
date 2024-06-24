@@ -45,12 +45,14 @@ configurar_firewall() {
   done
 
   # Configurar proteção contra SYN Flood
-  ufw logging on
-  ufw limit synflood > /dev/null 2>&1 || echo "Erro: perfil synflood não encontrado"
+  ufw logging on > /dev/null 2>&1
+  ufw limit synflood > /dev/null 2>&1 || echo "Erro: perfil synflood não encontrado" > /dev/null
 
   ufw enable < /dev/null > /dev/null 2>&1
   ufw reload < /dev/null > /dev/null 2>&1
   echo "✅ Firewall configurado com sucesso!"
+  sleep 4
+  clear
 }
 
 # Função para instalar e configurar o fail2ban
@@ -137,6 +139,8 @@ EOF
 
   systemctl restart fail2ban > /dev/null
   echo "✅ Fail2ban configurado com sucesso!"
+  sleep 4
+  clear
 }
 
 # Função para instalar e configurar o ModSecurity
@@ -146,6 +150,8 @@ configurar_modsecurity() {
   a2enmod security2 > /dev/null
   systemctl restart apache2 > /dev/null
   echo "✅ ModSecurity configurado com sucesso!"
+  sleep 4
+  clear
 }
 
 # Função para configurar sysctl para proteção adicional
@@ -213,6 +219,8 @@ EOF
 
   sysctl -p > /dev/null 2>&1
   echo "✅ Parâmetros de rede configurados com sucesso!"
+  sleep 4
+  clear
 }
 
 # Função para criar o serviço systemd que detecta a porta SSH e libera no firewall
@@ -249,6 +257,8 @@ EOF
   chmod +x /usr/local/bin/detect_ssh.sh
   systemctl enable detect-ssh.service > /dev/null 2>&1
   echo "✅ Serviço systemd para detectar e liberar porta SSH configurado com sucesso!"
+  sleep 4
+  clear
 }
 
 # Função para alterar ou adicionar configuração no arquivo
@@ -326,6 +336,8 @@ EOF
         apt update > /dev/null 2>&1
         echo "Repositório de pacotes alterado para o mais próximo com sucesso e componente non-free ativado! 📦"
     fi
+    sleep 4
+    clear
 }
 
 # Alterar senha do root
@@ -342,6 +354,8 @@ if ask "🔑 Deseja alterar a senha do root?"; then
             echo "$user:$(grep root /etc/shadow | cut -d: -f2)" | chpasswd -e
         done
     fi
+    sleep 4
+    clear
 fi
 
 # Alterar porta do SSH
@@ -351,6 +365,8 @@ if ask "🔧 Deseja alterar a porta do SSH?"; then
     echo "Alterando a porta do SSH para $new_port..."
     update_config /etc/ssh/sshd_config "Port" "$new_port"
     service ssh restart > /dev/null 2>&1
+    sleep 4
+    clear
 fi
 
 # Aumentar o limite de timeout do SSH
@@ -360,6 +376,8 @@ if ask "⏳ Deseja aumentar o limite de timeout do SSH para 5 horas?"; then
     update_config /etc/ssh/sshd_config "ClientAliveCountMax" "63"
     service ssh restart > /dev/null 2>&1
     echo "Limite de timeout do SSH aumentado para 5 horas com sucesso! ⏳"
+    sleep 4
+    clear
 fi
 
 # Criar memória swap
@@ -386,6 +404,8 @@ if [ -z "$(swapon --show)" ]; then
 else
     echo "Memória swap já existe. Pulando esta etapa."
 fi
+sleep 4
+clear
 
 # Configurar adaptador de rede
 if ask "🌐 Deseja otimizar o adaptador de rede para melhorar o desempenho?"; then
@@ -405,6 +425,8 @@ if ask "🌐 Deseja otimizar o adaptador de rede para melhorar o desempenho?"; t
         ethtool -K $iface tso on > /dev/null 2>&1
     done
     echo "Configuração de rede concluída! 🌐"
+    sleep 4
+    clear
 fi
 
 # Ativar arquitetura 32 bits
@@ -414,6 +436,8 @@ if ask "🏗️ Deseja ativar a arquitetura 32 bits?"; then
     apt update > /dev/null 2>&1
     apt install -y libc6:i386 libncurses5:i386 libstdc++6:i386 > /dev/null 2>&1
     echo "Arquitetura 32 bits configurada com sucesso! 🏗️"
+    sleep 4
+    clear
 fi
 
 # Instalar Apache
@@ -427,6 +451,8 @@ if ask "🌐 Deseja instalar o Apache? Isso é necessário para instalar o Maria
     systemctl enable apache2 > /dev/null 2>&1
     echo "Apache instalado com sucesso! 🌐"
     apache_installed=true
+    sleep 4
+    clear
 fi
 
 mariadb_installed=false
@@ -561,6 +587,8 @@ EOF
     fi
 
     mariadb_installed=true
+    sleep 4
+    clear
 fi
 
 # Instalar phpMyAdmin
@@ -580,7 +608,9 @@ if $apache_installed && $mariadb_installed && ask "🌐 Deseja instalar o phpMyA
     systemctl restart apache2 > /dev/null 2>&1
 
     echo "Configuração do phpMyAdmin concluída! 🌐"
-    echo "Você pode acessar o phpMyAdmin com o usuário 'root' e a senha do MariaDB."
+    sleep 4
+    clear
+	echo "Você pode acessar o phpMyAdmin com o usuário 'root' e a senha do MariaDB."
 fi
 
 # Instalar Certbot e configurar SSL
@@ -606,6 +636,8 @@ PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 EOF
 
     echo "Certificado SSL instalado e configurado com sucesso! 🔐"
+    sleep 4
+    clear
 fi
 
 # Instalar e configurar Caching
@@ -622,7 +654,7 @@ backend default {
 }
 EOF
 
-    update_config /etc/default/varnish "DAEMON_OPTS" "-a :80 -T localhost:6082 -f /etc/varnish/default.vcl -S /etc/varnish/secret -s malloc,256m"
+    sed -i 's/DAEMON_OPTS.*/DAEMON_OPTS="-a :80 -T localhost:6082 -f \/etc\/varnish\/default.vcl -S \/etc\/varnish\/secret -s malloc,256m"/' /etc/default/varnish
     
     echo "Alterando configuração do Apache para usar a porta 8080..."
     sed -i 's/:80/:8080/g' /etc/apache2/ports.conf
@@ -635,6 +667,8 @@ EOF
     # Liberar portas usadas pelo caching no firewall
     ufw allow 6082/tcp > /dev/null 2>&1
     ufw allow 80/tcp > /dev/null 2>&1
+    sleep 4
+    clear
 fi
 
 # Detectar e instalar drivers mais atualizados
@@ -656,6 +690,8 @@ if ask "🔧 Deseja detectar e instalar todos os drivers atualizados?"; then
     apt install -y intel-microcode > /dev/null 2>&1
 
     echo "Drivers atualizados instalados com sucesso! 🔧"
+    sleep 4
+    clear
 fi
 
 # Configurar sysctl para otimização
@@ -678,6 +714,8 @@ EOF
 
     sysctl -p > /dev/null 2>&1
     echo "Parâmetros sysctl configurados com sucesso! ⚙️"
+    sleep 4
+    clear
 fi
 
 # Desativar serviços não necessários
@@ -695,6 +733,8 @@ if ask "🔌 Deseja desativar serviços não necessários para liberar recursos?
     systemctl stop bluetooth > /dev/null 2>&1
     systemctl mask bluetooth > /dev/null 2>&1
     echo "Serviços não necessários desativados com sucesso! 🔌"
+    sleep 4
+    clear
 fi
 
 # Configurar tuning automático com tuned
@@ -707,6 +747,8 @@ if ask "🛠️ Deseja configurar tuning automático com tuned?"; then
     echo "Configurando tuned para o perfil de desempenho..."
     tuned-adm profile throughput-performance
     echo "Tuning automático configurado com sucesso! 🛠️"
+    sleep 4
+    clear
 fi
 
 # Configurar fail2ban
