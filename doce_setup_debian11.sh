@@ -451,8 +451,8 @@ if $apache_installed && ask "🗄️ Deseja instalar o MariaDB?"; then
     sleep 5
 
     if ! systemctl is-active --quiet mariadb; then
-	    echo "Aguarde, serviço MariaDB iniciando..."
-        sleep 5
+        echo "Aguarde, serviço MariaDB iniciando..."
+        sleep 7
     fi
 	
     if ! systemctl is-active --quiet mariadb; then
