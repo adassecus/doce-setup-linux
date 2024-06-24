@@ -446,7 +446,8 @@ if $apache_installed && ask "🗄️ Deseja instalar o MariaDB?"; then
     read -s mariadb_root_password
 
     echo "Configurando MariaDB..."
-    mysql_secure_installation <<EOF | grep -vE 'stty:|Enter current password|Change the root password|New password|Re-enter new password|Reload privilege tables now'
+    LOG_FILE=$(mktemp)
+    mysql_secure_installation <<EOF > $LOG_FILE 2>&1
 Y
 n
 Y
@@ -454,6 +455,11 @@ Y
 Y
 Y
 EOF
+
+    if grep -q "ERROR" $LOG_FILE; then
+        cat $LOG_FILE
+    fi
+    rm $LOG_FILE
 
     echo "Aplicando senha de root ao MariaDB e ajustando configurações..."
     mysql -u root -e "SET PASSWORD FOR root@localhost = PASSWORD('$mariadb_root_password');" 2>/dev/null
