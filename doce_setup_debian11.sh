@@ -457,7 +457,7 @@ if $apache_installed && ask "🗄️ Deseja instalar o MariaDB?"; then
 
     echo "Configurando MariaDB..."
     SECURE_MYSQL=$(expect -c "
-    set timeout 10
+   
     spawn mysql_secure_installation
 
     expect \"Enter current password for root (enter for none):\"
