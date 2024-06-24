@@ -447,6 +447,11 @@ if $apache_installed && ask "🗄️ Deseja instalar o MariaDB?"; then
     echo "Iniciando o serviço MariaDB..."
     systemctl start mariadb > /dev/null 2>&1
 
+    if ! systemctl is-active --quiet mariadb; then
+        echo "Erro: não foi possível iniciar o serviço MariaDB."
+        exit 1
+    fi
+
     echo "Por favor, digite a senha do root para o MariaDB:"
     read -s mariadb_root_password
 
@@ -485,21 +490,10 @@ if $apache_installed && ask "🗄️ Deseja instalar o MariaDB?"; then
     echo "$SECURE_MYSQL"
 
     echo "Aplicando senha de root ao MariaDB e ajustando configurações..."
-    if ! mysql -u root -p"$mariadb_root_password" -e "SET PASSWORD FOR root@localhost = PASSWORD('$mariadb_root_password');" 2>/dev/null; then
-        echo "Erro ao aplicar senha de root ao MariaDB"
-    fi
-
-    if ! mysql -u root -p"$mariadb_root_password" -e "DELETE FROM mysql.user WHERE User='';" 2>/dev/null; then
-        echo "Erro ao remover usuários anônimos do MariaDB"
-    fi
-
-    if ! mysql -u root -p"$mariadb_root_password" -e "DROP DATABASE IF EXISTS test;" 2>/dev/null; then
-        echo "Erro ao remover banco de dados de teste do MariaDB"
-    fi
-
-    if ! mysql -u root -p"$mariadb_root_password" -e "FLUSH PRIVILEGES;" 2>/dev/null; then
-        echo "Erro ao recarregar privilégios no MariaDB"
-    fi
+    mysql -u root -p"$mariadb_root_password" -e "SET PASSWORD FOR root@localhost = PASSWORD('$mariadb_root_password');" 2>/dev/null
+    mysql -u root -p"$mariadb_root_password" -e "DELETE FROM mysql.user WHERE User='';" 2>/dev/null
+    mysql -u root -p"$mariadb_root_password" -e "DROP DATABASE IF EXISTS test;" 2>/dev/null
+    mysql -u root -p"$mariadb_root_password" -e "FLUSH PRIVILEGES;" 2>/dev/null
 
     # Verificar se o arquivo de configuração do MariaDB existe antes de modificá-lo
     config_file="/etc/mysql/mariadb.conf.d/50-server.cnf"
@@ -517,6 +511,12 @@ if $apache_installed && ask "🗄️ Deseja instalar o MariaDB?"; then
         fi
         echo "Reiniciando o serviço MariaDB..."
         systemctl restart mariadb > /dev/null 2>&1
+
+        if ! systemctl is-active --quiet mariadb; then
+            echo "Erro: não foi possível reiniciar o serviço MariaDB."
+            exit 1
+        fi
+
         echo "MariaDB instalado e configurado com sucesso!"
     else
         echo "Arquivo de configuração do MariaDB não encontrado: $config_file"
