@@ -16,6 +16,241 @@ ask() {
     done
 }
 
+# Função para detectar a porta SSH
+detectar_porta_ssh() {
+  PORTA_SSH=$(grep -E "^Port " /etc/ssh/sshd_config | awk '{print $2}')
+  if [ -z "$PORTA_SSH" ]; then
+    PORTA_SSH=22
+  fi
+  echo "🔍 Porta SSH detectada: $PORTA_SSH"
+}
+
+# Função para configurar o firewall
+configurar_firewall() {
+  echo "🔥 Configurando firewall..."
+  apt-get update -qq > /dev/null
+  apt-get install -y ufw -qq > /dev/null
+  echo "y" | ufw reset > /dev/null 2>&1
+  ufw default deny incoming > /dev/null
+  ufw default allow outgoing > /dev/null
+  
+  # Detectar e permitir porta SSH
+  detectar_porta_ssh
+  ufw limit $PORTA_SSH/tcp > /dev/null # Habilitar rate limiting para SSH
+
+  # Permitir todas as portas de jogos e serviços populares
+  PORTAS_SERVICOS=("25565" "27015" "27016" "7777" "2302" "6667" "28960" "44405" "3724" "6112" "6881" "3784" "5000" "443" "80" "5222" "5223" "3478" "5938")
+  for porta in "${PORTAS_SERVICOS[@]}"; do
+    ufw allow $porta > /dev/null
+  done
+
+  # Configurar proteção contra SYN Flood
+  ufw logging on
+  ufw limit synflood
+
+  ufw enable < /dev/null > /dev/null 2>&1
+  ufw reload < /dev/null > /dev/null 2>&1
+  echo "✅ Firewall configurado com sucesso!"
+}
+
+# Função para instalar e configurar o fail2ban
+configurar_fail2ban() {
+  echo "🛡️ Instalando e configurando o fail2ban..."
+  apt-get install -y fail2ban -qq > /dev/null
+  systemctl enable fail2ban > /dev/null 2>&1
+  systemctl start fail2ban > /dev/null 2>&1
+  
+  # Configuração avançada do fail2ban
+  cat <<EOF > /etc/fail2ban/jail.local
+[DEFAULT]
+bantime = 3600
+findtime = 600
+maxretry = 3
+
+[sshd]
+enabled = true
+port = $PORTA_SSH
+filter = sshd
+logpath = /var/log/auth.log
+
+[http-get-dos]
+enabled = true
+port = http,https
+filter = http-get-dos
+logpath = /var/log/apache2/access.log
+maxretry = 300
+findtime = 300
+bantime = 3600
+
+[apache-auth]
+enabled = true
+port = http,https
+filter = apache-auth
+logpath = /var/log/apache2/error.log
+maxretry = 6
+
+[game-server]
+enabled = true
+port = 25565,27015,27016,7777,2302,6667,28960,44405,3724,6112,6881,3784,5000
+filter = game-server
+logpath = /var/log/syslog
+maxretry = 10
+findtime = 60
+bantime = 600
+
+[discord-telegram]
+enabled = true
+port = 443,80,5222,5223,3478,5938
+filter = discord-telegram
+logpath = /var/log/syslog
+maxretry = 10
+findtime = 60
+bantime = 600
+
+[generic-dos]
+enabled = true
+port = all
+filter = generic-dos
+logpath = /var/log/syslog
+maxretry = 100
+findtime = 60
+bantime = 600
+EOF
+
+  cat <<EOF > /etc/fail2ban/filter.d/game-server.conf
+[Definition]
+failregex = ^<HOST> -.*"(GET|POST).*
+ignoreregex =
+EOF
+
+  cat <<EOF > /etc/fail2ban/filter.d/discord-telegram.conf
+[Definition]
+failregex = ^<HOST> -.*"(GET|POST).*
+ignoreregex =
+EOF
+
+  cat <<EOF > /etc/fail2ban/filter.d/generic-dos.conf
+[Definition]
+failregex = ^<HOST> -.*"(GET|POST|HEAD|OPTIONS).*
+ignoreregex =
+EOF
+
+  systemctl restart fail2ban > /dev/null
+  echo "✅ Fail2ban configurado com sucesso!"
+}
+
+# Função para instalar e configurar o ModSecurity
+configurar_modsecurity() {
+  echo "🔒 Instalando e configurando o ModSecurity..."
+  apt-get install -y libapache2-mod-security2 -qq > /dev/null
+  a2enmod security2 > /dev/null
+  systemctl restart apache2 > /dev/null
+  echo "✅ ModSecurity configurado com sucesso!"
+}
+
+# Função para configurar sysctl para proteção adicional
+configurar_sysctl_protecao() {
+  echo "🔧 Configurando parâmetros de rede para proteção adicional..."
+  
+  # Remover configurações duplicadas e obsoletas
+  sed -i '/net.ipv4.tcp_tw_recycle/d' /etc/sysctl.conf
+  sed -i '/net.ipv4.conf.all.rp_filter/d' /etc/sysctl.conf
+  sed -i '/net.ipv4.conf.default.rp_filter/d' /etc/sysctl.conf
+  sed -i '/net.ipv4.icmp_echo_ignore_broadcasts/d' /etc/sysctl.conf
+  sed -i '/net.ipv4.tcp_syncookies/d' /etc/sysctl.conf
+  sed -i '/net.ipv4.tcp_max_syn_backlog/d' /etc/sysctl.conf
+  sed -i '/net.ipv4.tcp_synack_retries/d' /etc/sysctl.conf
+  sed -i '/net.ipv4.tcp_syn_retries/d' /etc/sysctl.conf
+  sed -i '/net.ipv4.tcp_tw_reuse/d' /etc/sysctl.conf
+  sed -i '/net.ipv4.icmp_ratelimit/d' /etc/sysctl.conf
+  sed -i '/net.ipv4.ipfrag_low_thresh/d' /etc/sysctl.conf
+  sed -i '/net.ipv4.ipfrag_time/d' /etc/sysctl.conf
+  sed -i '/net.ipv4.tcp_rfc1337/d' /etc/sysctl.conf
+  sed -i '/net.ipv4.tcp_timestamps/d' /etc/sysctl.conf
+  sed -i '/net.ipv4.conf.all.accept_source_route/d' /etc/sysctl.conf
+  sed -i '/net.ipv4.conf.all.accept_redirects/d' /etc/sysctl.conf
+  sed -i '/net.ipv4.conf.all.secure_redirects/d' /etc/sysctl.conf
+
+  # Adicionar novas configurações
+  cat <<EOF >> /etc/sysctl.conf
+# Proteção contra IP spoofing
+net.ipv4.conf.all.rp_filter = 1
+net.ipv4.conf.default.rp_filter = 1
+
+# Proteção contra ataques Smurf
+net.ipv4.icmp_echo_ignore_broadcasts = 1
+
+# Proteção contra ataques SYN flood
+net.ipv4.tcp_syncookies = 1
+
+# Proteção contra ataques de negação de serviço (DoS)
+net.ipv4.tcp_max_syn_backlog = 2048
+net.ipv4.tcp_synack_retries = 2
+net.ipv4.tcp_syn_retries = 5
+
+# Proteção contra ataques de requisições maliciosas
+net.ipv4.tcp_tw_reuse = 1
+
+# Limitar taxa de novas conexões TCP
+net.ipv4.tcp_max_syn_backlog = 2048
+net.ipv4.tcp_synack_retries = 2
+net.ipv4.tcp_syn_retries = 5
+
+# Limitar taxa de pacotes ICMP
+net.ipv4.icmp_ratelimit = 100
+
+# Proteção contra ataques de fragmentação de IP
+net.ipv4.ipfrag_low_thresh = 196608
+net.ipv4.ipfrag_time = 60
+
+# Limitações adicionais para prevenção de DoS
+net.ipv4.tcp_rfc1337 = 1
+net.ipv4.tcp_timestamps = 0
+net.ipv4.conf.all.accept_source_route = 0
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.all.secure_redirects = 1
+EOF
+
+  sysctl -p > /dev/null 2>&1
+  echo "✅ Parâmetros de rede configurados com sucesso!"
+}
+
+# Função para criar o serviço systemd que detecta a porta SSH e libera no firewall
+criar_servico_systemd() {
+  echo "🔧 Configurando serviço systemd..."
+  
+  # Remover serviço anterior se existir
+  systemctl disable detect-ssh.service > /dev/null 2>&1
+  rm -f /etc/systemd/system/detect-ssh.service
+  rm -f /usr/local/bin/detect_ssh.sh
+  
+  cat <<EOF > /etc/systemd/system/detect-ssh.service
+[Unit]
+Description=Detectar e liberar porta SSH no firewall
+
+[Service]
+ExecStart=/usr/local/bin/detect_ssh.sh
+Type=oneshot
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  cat <<EOF > /usr/local/bin/detect_ssh.sh
+#!/bin/bash
+PORTA_SSH=\$(grep -E "^Port " /etc/ssh/sshd_config | awk '{print \$2}')
+if [ -z "\$PORTA_SSH" ]; then
+  PORTA_SSH=22
+fi
+ufw allow \$PORTA_SSH > /dev/null 2>&1
+EOF
+
+  chmod +x /usr/local/bin/detect_ssh.sh
+  systemctl enable detect-ssh.service > /dev/null 2>&1
+  echo "✅ Serviço systemd para detectar e liberar porta SSH configurado com sucesso!"
+}
+
 # Função para alterar ou adicionar configuração no arquivo
 update_config() {
     local file="$1"
@@ -99,6 +334,7 @@ if ask "🔑 Deseja alterar a senha do root?"; then
     passwd root
     echo "Fazendo alterações na configuração do SSH..."
     update_config /etc/ssh/sshd_config "PermitRootLogin" "yes"
+    update_config /etc/ssh/sshd_config "PasswordAuthentication" "yes"
     service ssh restart > /dev/null 2>&1
     if ask "🔄 Deseja aplicar a mesma senha do root para todos os outros usuários?"; then
         echo "Aplicando a mesma senha do root para todos os outros usuários..."
@@ -132,7 +368,7 @@ if [ -z "$(swapon --show)" ]; then
         echo "Digite o tamanho da memória swap (por exemplo, 4G para 4 Gigabytes, lembre-se de usar 'G' maiúsculo):"
         read swap_size
         swap_size=$(echo "$swap_size" | tr '[:lower:]' '[:upper:]')
-        if [ -z "$swap_size" ]; then
+        if [ -z "$swap_size" ];then
             swap_size="4G"
         fi
         echo "Criando memória swap de $swap_size..."
@@ -239,7 +475,7 @@ EOF
                 echo "sql_mode = \"\"" >> "$config_file"
             fi
         fi
-		echo "MariaDB instalado e configurado com sucesso!"
+        echo "MariaDB instalado e configurado com sucesso!"
         systemctl restart mariadb > /dev/null 2>&1
     else
         echo "Arquivo de configuração do MariaDB não encontrado: $config_file"
@@ -266,6 +502,151 @@ if $apache_installed && $mariadb_installed && ask "🌐 Deseja instalar o phpMyA
 
     echo "Configuração do phpMyAdmin concluída! 🌐"
     echo "Você pode acessar o phpMyAdmin com o usuário 'root' e a senha do MariaDB."
+fi
+
+# Instalar Certbot e configurar SSL
+if $apache_installed && ask "🔐 Deseja instalar um certificado SSL gratuito com renovação automática?"; then
+    echo "Instalando Certbot..."
+    apt install -y certbot python3-certbot-apache > /dev/null 2>&1
+
+    echo "Por favor, digite seu domínio ou IP (exemplo: seudominio.com ou 192.168.0.1):"
+    read domain
+
+    echo "Configurando Certbot para $domain..."
+    certbot --apache -d $domain
+
+    echo "Configurando renovação automática do certificado SSL..."
+    cat <<EOF > /etc/cron.d/certbot
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+0 3 * * * root certbot renew --quiet --deploy-hook "systemctl reload apache2"
+EOF
+
+    echo "Certificado SSL instalado e configurado com sucesso! 🔐"
+fi
+
+# Instalar e configurar Caching
+if ask "⚡ Deseja instalar e configurar caching com Varnish?"; then
+    echo "Instalando Varnish..."
+    apt install -y varnish > /dev/null 2>&1
+
+    echo "Configurando Varnish..."
+    cat <<EOF > /etc/varnish/default.vcl
+vcl 4.0;
+backend default {
+    .host = "127.0.0.1";
+    .port = "8080";
+}
+EOF
+
+    update_config /etc/default/varnish "DAEMON_OPTS" "-a :80 -T localhost:6082 -f /etc/varnish/default.vcl -S /etc/varnish/secret -s malloc,256m"
+    
+    echo "Alterando configuração do Apache para usar a porta 8080..."
+    sed -i 's/:80/:8080/g' /etc/apache2/ports.conf
+    sed -i 's/:80/:8080/g' /etc/apache2/sites-available/000-default.conf
+
+    systemctl restart apache2 > /dev/null 2>&1
+    systemctl restart varnish > /dev/null 2>&1
+
+    echo "Varnish instalado e configurado com sucesso! ⚡"
+    # Liberar portas usadas pelo caching no firewall
+    ufw allow 6082/tcp
+    ufw allow 80/tcp
+fi
+
+# Detectar e instalar drivers mais atualizados
+if ask "🔧 Deseja detectar e instalar todos os drivers mais atualizados?"; then
+    echo "Configurando repositórios para incluir 'non-free'..."
+    sed -i 's/main/main contrib non-free/g' /etc/apt/sources.list
+    apt update > /dev/null 2>&1
+
+    echo "Instalando ferramentas de detecção de drivers..."
+    apt install -y pciutils usbutils > /dev/null 2>&1
+
+    echo "Detectando hardware e instalando drivers mais atualizados..."
+    apt install -y firmware-linux-free firmware-linux-nonfree > /dev/null 2>&1
+    apt install -y firmware-misc-nonfree > /dev/null 2>&1
+    apt install -y firmware-realtek > /dev/null 2>&1
+    apt install -y firmware-iwlwifi > /dev/null 2>&1
+    apt install -y intel-microcode > /dev/null 2>&1
+
+    echo "Drivers mais atualizados instalados com sucesso! 🔧"
+fi
+
+# Configurar sysctl para otimização
+if ask "⚙️ Deseja configurar parâmetros sysctl para otimização?"; then
+    echo "Configurando parâmetros sysctl para otimização..."
+    cat <<EOF >> /etc/sysctl.conf
+
+# Melhorias de desempenho
+net.core.netdev_max_backlog = 5000
+net.core.rmem_max = 16777216
+net.core.somaxconn = 1024
+net.core.wmem_max = 16777216
+net.ipv4.tcp_max_syn_backlog = 20480
+net.ipv4.tcp_rmem = 4096 87380 16777216
+net.ipv4.tcp_wmem = 4096 65536 16777216
+vm.swappiness = 10
+vm.dirty_ratio = 15
+vm.dirty_background_ratio = 5
+EOF
+
+    sysctl -p > /dev/null 2>&1
+    echo "Parâmetros sysctl configurados com sucesso! ⚙️"
+fi
+
+# Desativar serviços não necessários
+if ask "🔌 Deseja desativar serviços não necessários para liberar recursos?"; then
+    echo "Desativando serviços não necessários..."
+    systemctl disable cups-browsed > /dev/null 2>&1
+    systemctl stop cups-browsed > /dev/null 2>&1
+    systemctl mask cups-browsed > /dev/null 2>&1
+
+    systemctl disable avahi-daemon > /dev/null 2>&1
+    systemctl stop avahi-daemon > /dev/null 2>&1
+    systemctl mask avahi-daemon > /dev/null 2>&1
+
+    systemctl disable bluetooth > /dev/null 2>&1
+    systemctl stop bluetooth > /dev/null 2>&1
+    systemctl mask bluetooth > /dev/null 2>&1
+    echo "Serviços não necessários desativados com sucesso! 🔌"
+fi
+
+# Configurar tuning automático com tuned
+if ask "🛠️ Deseja configurar tuning automático com tuned?"; then
+    echo "Instalando tuned..."
+    apt install -y tuned > /dev/null 2>&1
+    systemctl start tuned > /dev/null 2>&1
+    systemctl enable tuned > /dev/null 2>&1
+
+    echo "Configurando tuned para o perfil de desempenho..."
+    tuned-adm profile throughput-performance
+    echo "Tuning automático configurado com sucesso! 🛠️"
+fi
+
+# Configurar fail2ban
+if ask "🛡️ Deseja configurar o fail2ban para proteção adicional?"; then
+    configurar_fail2ban
+fi
+
+# Configurar ModSecurity
+if ask "🔒 Deseja configurar o ModSecurity para proteção do servidor web?"; then
+    configurar_modsecurity
+fi
+
+# Configurar sysctl para proteção
+if ask "🔧 Deseja configurar parâmetros sysctl para proteção adicional?"; then
+    configurar_sysctl_protecao
+fi
+
+# Configurar firewall
+if ask "🔥 Deseja configurar o firewall para proteger todas as portas de jogos e serviços populares?"; then
+    configurar_firewall
+fi
+
+# Configurar serviço systemd para detectar porta SSH
+if ask "🔧 Deseja configurar um serviço para detectar e liberar automaticamente a porta SSH no firewall após reinicializações?"; then
+    criar_servico_systemd
 fi
 
 # Alterar o idioma do sistema
