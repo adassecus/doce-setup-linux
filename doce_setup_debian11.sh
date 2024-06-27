@@ -247,11 +247,29 @@ EOF
 
   cat <<EOF > /usr/local/bin/detect_ssh.sh
 #!/bin/bash
+
+# Detecta a porta SSH configurada
 PORTA_SSH=\$(grep -E "^Port " /etc/ssh/sshd_config | awk '{print \$2}')
 if [ -z "\$PORTA_SSH" ]; then
   PORTA_SSH=22
 fi
-ufw allow \$PORTA_SSH > /dev/null 2>&1
+
+# Verifica se a porta SSH configurada já está permitida
+PORTA_EXISTE=\$(ufw status | grep -E "ALLOW IN" | grep "tcp/\$PORTA_SSH")
+
+# Remove todas as regras existentes para portas SSH, exceto a porta configurada atual se já estiver permitida
+ufw status numbered | grep "ALLOW IN" | grep -E "tcp\s+22|tcp\s+[0-9]+" | while read -r line; do
+  rule_number=\$(echo \$line | awk '{print \$1}' | tr -d '[]')
+  port_number=\$(echo \$line | awk '{print \$NF}' | cut -d'/' -f1)
+  if [ "\$port_number" -ne "\$PORTA_SSH" ]; then
+    ufw delete \$rule_number
+  fi
+done
+
+# Adiciona a nova regra para a porta SSH configurada, se ainda não estiver permitida
+if [ -z "\$PORTA_EXISTE" ]; then
+  ufw allow \$PORTA_SSH > /dev/null 2>&1
+fi
 EOF
 
   chmod +x /usr/local/bin/detect_ssh.sh
