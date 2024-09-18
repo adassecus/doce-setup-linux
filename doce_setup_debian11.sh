@@ -3,7 +3,6 @@
 echo "🍬 Bem-vindo ao DoceSetup - Seu Assistente de Configuração do Debian Server!"
 echo "Por favor, responda às perguntas para configurar o servidor de forma fácil e rápida."
 
-# Função para fazer perguntas e capturar respostas
 ask() {
     while true; do
         echo -n "$1 (y/n): "
@@ -16,7 +15,6 @@ ask() {
     done
 }
 
-# Função para detectar a porta SSH
 detectar_porta_ssh() {
   PORTA_SSH=$(grep -E "^Port " /etc/ssh/sshd_config | awk '{print $2}')
   if [ -z "$PORTA_SSH" ]; then
@@ -25,7 +23,6 @@ detectar_porta_ssh() {
   echo "🔍 Porta SSH detectada: $PORTA_SSH"
 }
 
-# Função para configurar o firewall
 configurar_firewall() {
   echo "🔥 Configurando firewall..."
   apt-get update -qq > /dev/null
@@ -34,17 +31,14 @@ configurar_firewall() {
   ufw default deny incoming > /dev/null
   ufw default allow outgoing > /dev/null
   
-  # Detectar e permitir porta SSH
   detectar_porta_ssh
-  ufw limit $PORTA_SSH/tcp > /dev/null # Habilitar rate limiting para SSH
+  ufw limit $PORTA_SSH/tcp > /dev/null 
 
-  # Permitir todas as portas de jogos e serviços populares
   PORTAS_SERVICOS=("25565" "27015" "27016" "7777" "2302" "6667" "28960" "44405" "3724" "6112" "6881" "3784" "5000" "443" "80" "5222" "5223" "3478" "5938")
   for porta in "${PORTAS_SERVICOS[@]}"; do
     ufw allow $porta > /dev/null
   done
 
-  # Configurar proteção contra SYN Flood
   ufw logging on > /dev/null 2>&1
   ufw limit synflood > /dev/null 2>&1 || echo "Erro: perfil synflood não encontrado" > /dev/null
 
@@ -55,14 +49,12 @@ configurar_firewall() {
   clear
 }
 
-# Função para instalar e configurar o fail2ban
 configurar_fail2ban() {
   echo "🛡️ Instalando e configurando o fail2ban..."
   apt-get install -y fail2ban -qq > /dev/null
   systemctl enable fail2ban > /dev/null 2>&1
   systemctl start fail2ban > /dev/null 2>&1
   
-  # Configuração avançada do fail2ban
   cat <<EOF > /etc/fail2ban/jail.local
 [DEFAULT]
 bantime = 3600
@@ -143,7 +135,6 @@ EOF
   clear
 }
 
-# Função para instalar e configurar o ModSecurity
 configurar_modsecurity() {
   echo "🔒 Instalando e configurando o ModSecurity..."
   apt-get install -y libapache2-mod-security2 -qq > /dev/null
@@ -154,11 +145,9 @@ configurar_modsecurity() {
   clear
 }
 
-# Função para configurar sysctl para proteção adicional
 configurar_sysctl_protecao() {
   echo "🔧 Configurando parâmetros de rede para proteção adicional..."
   
-  # Remover configurações duplicadas e obsoletas
   sed -i '/net.ipv4.tcp_tw_recycle/d' /etc/sysctl.conf
   sed -i '/net.ipv4.conf.all.rp_filter/d' /etc/sysctl.conf
   sed -i '/net.ipv4.conf.default.rp_filter/d' /etc/sysctl.conf
@@ -177,39 +166,29 @@ configurar_sysctl_protecao() {
   sed -i '/net.ipv4.conf.all.accept_redirects/d' /etc/sysctl.conf
   sed -i '/net.ipv4.conf.all.secure_redirects/d' /etc/sysctl.conf
 
-  # Adicionar novas configurações
   cat <<EOF >> /etc/sysctl.conf
-# Proteção contra IP spoofing
 net.ipv4.conf.all.rp_filter = 1
 net.ipv4.conf.default.rp_filter = 1
 
-# Proteção contra ataques Smurf
 net.ipv4.icmp_echo_ignore_broadcasts = 1
 
-# Proteção contra ataques SYN flood
 net.ipv4.tcp_syncookies = 1
 
-# Proteção contra ataques de negação de serviço (DoS)
 net.ipv4.tcp_max_syn_backlog = 2048
 net.ipv4.tcp_synack_retries = 2
 net.ipv4.tcp_syn_retries = 5
 
-# Proteção contra ataques de requisições maliciosas
 net.ipv4.tcp_tw_reuse = 1
 
-# Limitar taxa de novas conexões TCP
 net.ipv4.tcp_max_syn_backlog = 2048
 net.ipv4.tcp_synack_retries = 2
 net.ipv4.tcp_syn_retries = 5
 
-# Limitar taxa de pacotes ICMP
 net.ipv4.icmp_ratelimit = 100
 
-# Proteção contra ataques de fragmentação de IP
 net.ipv4.ipfrag_low_thresh = 196608
 net.ipv4.ipfrag_time = 60
 
-# Limitações adicionais para prevenção de DoS
 net.ipv4.tcp_rfc1337 = 1
 net.ipv4.tcp_timestamps = 0
 net.ipv4.conf.all.accept_source_route = 0
@@ -223,11 +202,9 @@ EOF
   clear
 }
 
-# Função para criar o serviço systemd que detecta a porta SSH e libera no firewall
 criar_servico_systemd() {
   echo "🔧 Configurando serviço systemd..."
   
-  # Remover serviço anterior se existir
   systemctl disable detect-ssh.service > /dev/null 2>&1
   rm -f /etc/systemd/system/detect-ssh.service
   rm -f /usr/local/bin/detect_ssh.sh
@@ -248,16 +225,13 @@ EOF
   cat <<EOF > /usr/local/bin/detect_ssh.sh
 #!/bin/bash
 
-# Detecta a porta SSH configurada
 PORTA_SSH=\$(grep -E "^Port " /etc/ssh/sshd_config | awk '{print \$2}')
 if [ -z "\$PORTA_SSH" ]; then
   PORTA_SSH=22
 fi
 
-# Verifica se a porta SSH configurada já está permitida
 PORTA_EXISTE=\$(ufw status | grep -E "ALLOW IN" | grep "tcp/\$PORTA_SSH")
 
-# Remove todas as regras existentes para portas SSH, exceto a porta configurada atual se já estiver permitida
 ufw status numbered | grep "ALLOW IN" | grep -E "tcp\s+22|tcp\s+[0-9]+" | while read -r line; do
   rule_number=\$(echo \$line | awk '{print \$1}' | tr -d '[]')
   port_number=\$(echo \$line | awk '{print \$NF}' | cut -d'/' -f1)
@@ -266,7 +240,6 @@ ufw status numbered | grep "ALLOW IN" | grep -E "tcp\s+22|tcp\s+[0-9]+" | while 
   fi
 done
 
-# Adiciona a nova regra para a porta SSH configurada, se ainda não estiver permitida
 if [ -z "\$PORTA_EXISTE" ]; then
   ufw allow \$PORTA_SSH > /dev/null 2>&1
 fi
@@ -279,7 +252,6 @@ EOF
   clear
 }
 
-# Função para alterar ou adicionar configuração no arquivo
 update_config() {
     local file="$1"
     local param="$2"
@@ -291,7 +263,6 @@ update_config() {
     fi
 }
 
-# Função para alterar o idioma do sistema
 change_locale() {
     echo "Escolha um idioma da lista abaixo digitando o número correspondente:"
     echo "1. 🇺🇸 en_US.UTF-8 - Inglês (Estados Unidos)"
@@ -329,11 +300,9 @@ change_locale() {
     if ask "Deseja alterar o repositório de pacotes para o mais próximo baseado no idioma selecionado?"; then
         echo "Alterando repositório de pacotes para o mais próximo e ativando o componente non-free..."
 
-        # Remove todos os repositórios existentes
         sed -i '/^deb .*debian.org/d' /etc/apt/sources.list
         sed -i '/^deb-src .*debian.org/d' /etc/apt/sources.list
 
-        # Adiciona os novos repositórios ao sources.list
         cat <<EOF > /etc/apt/sources.list
 deb $new_repo bullseye main contrib non-free
 deb-src $new_repo bullseye main contrib non-free
@@ -355,7 +324,6 @@ EOF
     clear
 }
 
-# Alterar senha do root
 if ask "🔑 Deseja alterar a senha do root?"; then
     echo "Vamos alterar a senha do root. Por favor, digite a nova senha:"
     passwd root
@@ -373,7 +341,6 @@ if ask "🔑 Deseja alterar a senha do root?"; then
     clear
 fi
 
-# Alterar porta do SSH
 if ask "🔧 Deseja alterar a porta do SSH?"; then
     echo "Digite a nova porta do SSH:"
     read new_port
@@ -384,7 +351,6 @@ if ask "🔧 Deseja alterar a porta do SSH?"; then
     clear
 fi
 
-# Aumentar o limite de timeout do SSH
 if ask "⏳ Deseja aumentar o limite de timeout do SSH para 5 horas?"; then
     echo "Aumentando o limite de timeout do SSH para 5 horas..."
     update_config /etc/ssh/sshd_config "ClientAliveInterval" "290"
@@ -395,7 +361,6 @@ if ask "⏳ Deseja aumentar o limite de timeout do SSH para 5 horas?"; then
     clear
 fi
 
-# Criar memória swap
 if [ -z "$(swapon --show)" ]; then
     if ask "💾 Deseja criar uma memória swap?"; then
         echo "Digite o tamanho da memória swap (por exemplo, 4G para 4 Gigabytes, lembre-se de usar 'G' maiúsculo):"
@@ -422,7 +387,6 @@ fi
 sleep 4
 clear
 
-# Configurar adaptador de rede
 if ask "🌐 Deseja otimizar o adaptador de rede para melhorar o desempenho?"; then
     echo "Configurando o adaptador de rede para melhor desempenho..."
     for iface in $(ls /sys/class/net/ | grep -v lo); do
@@ -444,7 +408,6 @@ if ask "🌐 Deseja otimizar o adaptador de rede para melhorar o desempenho?"; t
     clear
 fi
 
-# Ativar arquitetura 32 bits
 if ask "🏗️ Deseja ativar a arquitetura 32 bits?"; then
     echo "Ativando arquitetura 32 bits..."
     dpkg --add-architecture i386
@@ -455,7 +418,6 @@ if ask "🏗️ Deseja ativar a arquitetura 32 bits?"; then
     clear
 fi
 
-# Instalar Apache
 apache_installed=false
 if ask "🌐 Deseja instalar o Apache? Isso é necessário para instalar o MariaDB e o phpMyAdmin posteriormente."; then
     echo "Instalando dependências do Apache..."
@@ -476,7 +438,6 @@ if $apache_installed && ask "🗄️ Deseja instalar o MariaDB?"; then
     apt install -y software-properties-common dirmngr > /dev/null 2>&1
     apt install -y mariadb-server mariadb-client > /dev/null 2>&1
 
-    # Certifique-se de que mysql_secure_installation esteja disponível
     if ! command -v mysql_secure_installation &> /dev/null; then
         echo "Erro: mysql_secure_installation não encontrado, instalando MariaDB novamente."
         apt install -y mariadb-server mariadb-client > /dev/null 2>&1
@@ -502,7 +463,6 @@ EOF
     mysql -u root -p$mariadb_root_password -e "DROP DATABASE IF EXISTS test;" 2>/dev/null
     mysql -u root -p$mariadb_root_password -e "FLUSH PRIVILEGES;" 2>/dev/null
 
-    # Verificar se o arquivo de configuração do MariaDB existe antes de modificá-lo
     config_file="/etc/mysql/mariadb.conf.d/50-server.cnf"
     if [ -f "$config_file" ]; then
         echo "Desativando o modo estrito no MariaDB..."
@@ -517,7 +477,6 @@ EOF
             fi
         fi
 
-        # Configurações de otimização de desempenho
         echo "Adicionando otimizações de desempenho ao MariaDB..."
         if grep -q "innodb_buffer_pool_size" "$config_file"; then
             sed -i "s/^innodb_buffer_pool_size.*/innodb_buffer_pool_size = 1G/" "$config_file"
@@ -592,10 +551,8 @@ EOF
 
         echo "MariaDB instalado e configurado com sucesso!"
 
-        # Configurar MariaDB para iniciar com o sistema
         systemctl enable mariadb > /dev/null 2>&1
 
-        # Reiniciar o MariaDB para aplicar todas as configurações
         systemctl restart mariadb > /dev/null 2>&1
     else
         echo "Arquivo de configuração do MariaDB não encontrado: $config_file"
@@ -606,7 +563,6 @@ EOF
     clear
 fi
 
-# Instalar phpMyAdmin
 if $apache_installed && $mariadb_installed && ask "🌐 Deseja instalar o phpMyAdmin?"; then
     echo "Instalando dependências do phpMyAdmin..."
     apt install -y php libapache2-mod-php php-mysql php-json php-pear php-mbstring > /dev/null 2>&1
@@ -628,7 +584,6 @@ if $apache_installed && $mariadb_installed && ask "🌐 Deseja instalar o phpMyA
     echo "Você pode acessar o phpMyAdmin com o usuário 'root' e a senha do MariaDB."
 fi
 
-# Instalar Certbot e configurar SSL
 if $apache_installed && ask "🔐 Deseja instalar um certificado SSL gratuito com renovação automática?"; then
     echo "Instalando Certbot..."
     apt install -y certbot python3-certbot-apache > /dev/null 2>&1
@@ -655,7 +610,6 @@ EOF
     clear
 fi
 
-# Instalar e configurar Caching
 if ask "⚡ Deseja instalar e configurar caching com Varnish?"; then
     echo "Instalando Varnish..."
     apt install -y varnish > /dev/null 2>&1
@@ -679,14 +633,12 @@ EOF
     systemctl restart varnish > /dev/null 2>&1
 
     echo "Varnish instalado e configurado com sucesso! ⚡"
-    # Liberar portas usadas pelo caching no firewall
     ufw allow 6082/tcp > /dev/null 2>&1
     ufw allow 80/tcp > /dev/null 2>&1
     sleep 4
     clear
 fi
 
-# Detectar e instalar drivers mais atualizados
 if ask "🔧 Deseja detectar e instalar todos os drivers atualizados?"; then
     echo "Configurando repositórios para incluir 'non-free'..."
     if ! grep -q 'main contrib non-free' /etc/apt/sources.list; then
@@ -709,12 +661,10 @@ if ask "🔧 Deseja detectar e instalar todos os drivers atualizados?"; then
     clear
 fi
 
-# Configurar sysctl para otimização
 if ask "⚙️ Deseja configurar parâmetros sysctl para otimização?"; then
     echo "Configurando parâmetros sysctl para otimização..."
     cat <<EOF >> /etc/sysctl.conf
 
-# Melhorias de desempenho
 net.core.netdev_max_backlog = 5000
 net.core.rmem_max = 16777216
 net.core.somaxconn = 1024
@@ -733,7 +683,6 @@ EOF
     clear
 fi
 
-# Desativar serviços não necessários
 if ask "🔌 Deseja desativar serviços não necessários para liberar recursos?"; then
     echo "Desativando serviços não necessários..."
     systemctl disable cups-browsed > /dev/null 2>&1
@@ -752,7 +701,6 @@ if ask "🔌 Deseja desativar serviços não necessários para liberar recursos?
     clear
 fi
 
-# Configurar tuning automático com tuned
 if ask "🛠️ Deseja configurar tuning automático com tuned?"; then
     echo "Instalando tuned..."
     apt install -y tuned > /dev/null 2>&1
@@ -766,37 +714,30 @@ if ask "🛠️ Deseja configurar tuning automático com tuned?"; then
     clear
 fi
 
-# Configurar fail2ban
 if ask "🛡️ Deseja configurar o fail2ban para proteção adicional?"; then
     configurar_fail2ban
 fi
 
-# Configurar ModSecurity
 if ask "🔒 Deseja configurar o ModSecurity para proteção do servidor web?"; then
     configurar_modsecurity
 fi
 
-# Configurar sysctl para proteção
 if ask "🔧 Deseja configurar parâmetros sysctl para proteção adicional?"; then
     configurar_sysctl_protecao
 fi
 
-# Configurar firewall
 if ask "🔥 Deseja configurar o firewall para proteger todas as portas de jogos e serviços populares?"; then
     configurar_firewall
 fi
 
-# Configurar serviço systemd para detectar porta SSH
 if ask "🔧 Deseja configurar um serviço para detectar e liberar automaticamente a porta SSH no firewall após reinicializações?"; then
     criar_servico_systemd
 fi
 
-# Alterar o idioma do sistema
 if ask "🌍 Deseja alterar o idioma do sistema?"; then
     change_locale
 fi
 
-# Opção de reiniciar o servidor
 if ask "🔄 Deseja reiniciar o servidor agora para aplicar todas as alterações?"; then
     echo "Reiniciando o servidor..."
     echo "Após reiniciar, acesse o servidor utilizando a nova porta SSH, se alterada."
