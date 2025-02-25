@@ -74,3 +74,9 @@ Após completar as configurações, o script perguntará se você deseja reinici
 ---
 
 O **DoceSetup** é a ferramenta ideal para quem busca uma configuração rápida, segura e eficiente para seu servidor Debian 11. Experimente agora e veja a diferença no desempenho e segurança do seu sistema! 🍬
+
+## Contato
+
+Para dúvidas, sugestões ou problemas, entre em contato:
+
+📩 **[t.me/adassecus](https://t.me/adassecus)**
