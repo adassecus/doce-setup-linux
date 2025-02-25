@@ -1,4 +1,4 @@
-## DoceSetup 🍬
+## DoceSetup 1.5 🍬
 
 Bem-vindo ao **DoceSetup**, o seu assistente amigável e eficiente para configurar servidores Linux! Este script foi projetado para facilitar a configuração inicial do servidor, automatizando tarefas comuns e essenciais. Siga os passos abaixo para instalar e usar o DoceSetup e desfrute de uma configuração otimizada com melhorias significativas de segurança, desempenho e eficiência.
 
