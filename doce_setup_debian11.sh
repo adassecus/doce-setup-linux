@@ -682,7 +682,6 @@ EOF
     sysctl -p > /dev/null 2>&1
     echo "Parâmetros sysctl configurados com sucesso! ⚙️"
 
-    # Atualiza o systemd para que todos os novos processos herdem DefaultOOMScoreAdjust=-1000
     if grep -q "^DefaultOOMScoreAdjust=" /etc/systemd/system.conf; then
         sed -i "s/^DefaultOOMScoreAdjust=.*/DefaultOOMScoreAdjust=-1000/" /etc/systemd/system.conf
     else
