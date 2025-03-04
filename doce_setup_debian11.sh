@@ -661,7 +661,7 @@ if ask "🔧 Deseja detectar e instalar todos os drivers atualizados?"; then
     clear
 fi
 
-if ask "⚙️ Deseja configurar parâmetros sysctl para otimização?"; then
+if ask "⚙️ Deseja configurar parâmetros sysctl para otimização e desativar o OOM Killer?"; then
     echo "Configurando parâmetros sysctl para otimização..."
     cat <<EOF >> /etc/sysctl.conf
 
@@ -675,10 +675,22 @@ net.ipv4.tcp_wmem = 4096 65536 16777216
 vm.swappiness = 10
 vm.dirty_ratio = 15
 vm.dirty_background_ratio = 5
+vm.overcommit_memory = 1
+vm.panic_on_oom = 0
 EOF
 
     sysctl -p > /dev/null 2>&1
     echo "Parâmetros sysctl configurados com sucesso! ⚙️"
+
+    # Atualiza o systemd para que todos os novos processos herdem DefaultOOMScoreAdjust=-1000
+    if grep -q "^DefaultOOMScoreAdjust=" /etc/systemd/system.conf; then
+        sed -i "s/^DefaultOOMScoreAdjust=.*/DefaultOOMScoreAdjust=-1000/" /etc/systemd/system.conf
+    else
+        echo "DefaultOOMScoreAdjust=-1000" >> /etc/systemd/system.conf
+    fi
+
+    systemctl daemon-reexec > /dev/null 2>&1
+    echo "OOM Killer desativado."
     sleep 4
     clear
 fi
