@@ -48,7 +48,7 @@ O DoceSetup guiará você através de uma série de perguntas interativas para c
 - **Instalar um certificado SSL gratuito com renovação automática (Certbot):** Aumenta a segurança das conexões web em até 100% com HTTPS.
 - **Instalar e configurar caching com Varnish:** Pode melhorar a velocidade de resposta do servidor em até 300% para conteúdos estáticos.
 - **Detectar e instalar drivers mais atualizados:** Assegura que o hardware do servidor funcione da melhor forma possível, aumentando a estabilidade e desempenho em até 20%.
-- **Configurar parâmetros sysctl para otimização:** Ajustes de kernel que podem melhorar o desempenho geral do sistema em até 25%.
+- **Configurar parâmetros sysctl para otimização e desativar OOM Killer:** Ajustes de kernel que podem melhorar o desempenho geral do sistema em até 25%.
 - **Desativar serviços não necessários para liberar recursos:** Pode liberar até 15% dos recursos do sistema para uso em aplicações críticas.
 - **Configurar tuning automático com `tuned`:** Ajusta automaticamente as configurações do sistema com base no perfil de uso, potencializando o desempenho em até 20%.
 - **Configurar o firewall (UFW) para proteger todas as portas de jogos e serviços populares:**
