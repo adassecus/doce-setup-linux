@@ -581,7 +581,7 @@ def change_locale():
     os.environ['LANGUAGE'] = new_locale
     os.environ['LC_ALL'] = new_locale
     
-            print(f"Idioma do sistema alterado para {new_locale} com sucesso! 🎉")
+    print(f"Idioma do sistema alterado para {new_locale} com sucesso! 🎉")
     time.sleep(2)
 
 
