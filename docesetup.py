@@ -527,47 +527,55 @@ class LinuxSetup:
             self._print_info("Configuração do certificado SSL ignorada.")
 
     def disable_services(self):
-        self._print_header("Desativação de Serviços Desnecessários")
+    self._print_header("Desativação de Serviços Desnecessários")
+    
+    if self._ask("🔌 Deseja desativar serviços não necessários para liberar recursos?"):
+        services_to_disable = [
+            'cups-browsed',  # Impressoras
+            'avahi-daemon',  # Descoberta de serviços na rede
+            'bluetooth',     # Bluetooth
+            'ModemManager',  # Gestor de modems
+            'wpa_supplicant' # WiFi (cuidado se estiver usando WiFi)
+        ]
         
-        if self._ask("🔌 Deseja desativar serviços não necessários para liberar recursos?"):
-            services_to_disable = [
-                'cups-browsed',  # Impressoras
-                'avahi-daemon',  # Descoberta de serviços na rede
-                'bluetooth',     # Bluetooth
-                'ModemManager',  # Gestor de modems
-                'wpa_supplicant' # WiFi (cuidado se estiver usando WiFi)
-            ]
-            
-            # Perguntar ao usuário quais serviços deseja desativar
-            selected_services = []
-            for service in services_to_disable:
-                if self._ask(f"Deseja desativar o serviço {service}?"):
-                    selected_services.append(service)
-            
-            if not selected_services:
-                self._print_info("Nenhum serviço selecionado para desativação.")
-                return
-            
-            self._print_info("Desativando serviços selecionados...")
-            
-            if RICH_AVAILABLE:
-                with Progress(
-                    SpinnerColumn(),
-                    TextColumn("[bold blue]Desativando serviços..."),
-                    BarColumn(),
-                    TextColumn("[bold]{task.percentage:.0f}%"),
-                ) as progress:
-                    task = progress.add_task("[green]Processando...", total=len(selected_services)*3)
-                    
-                    for service in selected_services:
-                    print(f"Desativando {service}...")
+        # Perguntar ao usuário quais serviços deseja desativar
+        selected_services = []
+        for service in services_to_disable:
+            if self._ask(f"Deseja desativar o serviço {service}?"):
+                selected_services.append(service)
+        
+        if not selected_services:
+            self._print_info("Nenhum serviço selecionado para desativação.")
+            return
+        
+        self._print_info("Desativando serviços selecionados...")
+        
+        if RICH_AVAILABLE:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[bold blue]Desativando serviços..."),
+                BarColumn(),
+                TextColumn("[bold]{task.percentage:.0f}%"),
+            ) as progress:
+                task = progress.add_task("[green]Processando...", total=len(selected_services)*3)
+                
+                for service in selected_services:
                     self._execute_command(f"systemctl disable {service}")
+                    progress.update(task, advance=1)
                     self._execute_command(f"systemctl stop {service}")
+                    progress.update(task, advance=1)
                     self._execute_command(f"systemctl mask {service}")
-            
-            self._print_success("Serviços desnecessários desativados com sucesso!")
+                    progress.update(task, advance=1)
         else:
-            self._print_info("Desativação de serviços ignorada.")
+            for service in selected_services:
+                print(f"Desativando {service}...")
+                self._execute_command(f"systemctl disable {service}")
+                self._execute_command(f"systemctl stop {service}")
+                self._execute_command(f"systemctl mask {service}")
+        
+        self._print_success("Serviços desnecessários desativados com sucesso!")
+    else:
+        self._print_info("Desativação de serviços ignorada.")
 
     def change_locale(self):
         self._print_header("Alteração do Idioma do Sistema")
