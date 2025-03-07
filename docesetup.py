@@ -1034,6 +1034,36 @@ def setup_performance_tuning():
     time.sleep(2)
     os.system('clear')
 
+def configure_swap():
+    swap_exists = get_command_output("swapon --show")
+    if not swap_exists:
+        swap_size = input("Digite o tamanho da memória swap (por exemplo, 4G para 4 Gigabytes): ").upper()
+        if not swap_size:
+            swap_size = "4G"
+        
+        print(f"Criando memória swap de {swap_size}...")
+        
+        size_match = re.match(r'(\d+)([GMK])', swap_size)
+        if not size_match:
+            print("Formato de tamanho inválido. Usando 4G como padrão.")
+            swap_size = "4G"
+        
+        execute_command(f"fallocate -l {swap_size} /swapfile")
+        execute_command("chmod 600 /swapfile")
+        execute_command("mkswap /swapfile")
+        execute_command("swapon /swapfile")
+        
+        fstab_entry = "/swapfile none swap sw 0 0"
+        with open('/etc/fstab', 'r') as f:
+            fstab_content = f.read()
+        
+        if '/swapfile' in fstab_content:
+            fstab_content = re.sub(r'.*swapfile.*', fstab_entry, fstab_content)
+            with open('/etc/fstab', 'w') as f:
+                f.write(fstab_content)
+        else:
+            with open('/etc/fstab', 'a') as f:
+                f.write(f'\n{fstab_entry}\n')
 
 def main():
     check_root()
@@ -1134,35 +1164,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-def configure_swap():
-    swap_exists = get_command_output("swapon --show")
-    if not swap_exists:
-        swap_size = input("Digite o tamanho da memória swap (por exemplo, 4G para 4 Gigabytes): ").upper()
-        if not swap_size:
-            swap_size = "4G"
-        
-        print(f"Criando memória swap de {swap_size}...")
-        
-        size_match = re.match(r'(\d+)([GMK])', swap_size)
-        if not size_match:
-            print("Formato de tamanho inválido. Usando 4G como padrão.")
-            swap_size = "4G"
-        
-        execute_command(f"fallocate -l {swap_size} /swapfile")
-        execute_command("chmod 600 /swapfile")
-        execute_command("mkswap /swapfile")
-        execute_command("swapon /swapfile")
-        
-        fstab_entry = "/swapfile none swap sw 0 0"
-        with open('/etc/fstab', 'r') as f:
-            fstab_content = f.read()
-        
-        if '/swapfile' in fstab_content:
-            fstab_content = re.sub(r'.*swapfile.*', fstab_entry, fstab_content)
-            with open('/etc/fstab', 'w') as f:
-                f.write(fstab_content)
-        else:
-            with open('/etc/fstab', 'a') as f:
-                f.write(f'\n{fstab_entry}\n')
