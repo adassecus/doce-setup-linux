@@ -232,12 +232,10 @@ class LinuxSetup:
         if self._ask("🔑 Deseja permitir acesso SSH para o usuário root com senha?"):
             self._print_info("Configurando acesso SSH para root...")
             
-            # Atualizar as configurações do SSH
             ssh_config = '/etc/ssh/sshd_config'
             self._update_config(ssh_config, 'PermitRootLogin', 'yes')
             self._update_config(ssh_config, 'PasswordAuthentication', 'yes')
             
-            # Definir ou alterar a senha do root
             if self._ask("Deseja alterar a senha do usuário root?"):
                 self._print_info("Digite a nova senha do root:")
                 try:
@@ -245,7 +243,6 @@ class LinuxSetup:
                     if password:
                         self._execute_command(f"echo 'root:{password}' | chpasswd")
                         
-                        # Perguntar se deseja aplicar a mesma senha para outros usuários
                         if self._ask("Deseja aplicar a mesma senha para todos os outros usuários?"):
                             self._print_info("Aplicando senha para outros usuários...")
                             for user in pwd.getpwall():
@@ -260,7 +257,6 @@ class LinuxSetup:
                     self._print_error(f"Erro ao alterar a senha: {str(e)}")
                     return
             
-            # Reiniciar serviço SSH
             if RICH_AVAILABLE:
                 with Progress(SpinnerColumn(), TextColumn("[bold blue]Reiniciando serviço SSH...")) as progress:
                     progress.add_task("reiniciando", total=None)
@@ -284,7 +280,6 @@ class LinuxSetup:
                 self._update_config(ssh_config, 'ClientAliveInterval', '290')
                 self._update_config(ssh_config, 'ClientAliveCountMax', '63')
                 
-                # Reiniciar serviço SSH
                 if RICH_AVAILABLE:
                     with Progress(SpinnerColumn(), TextColumn("[bold blue]Aplicando configurações...")) as progress:
                         progress.add_task("aplicando", total=None)
@@ -302,20 +297,17 @@ class LinuxSetup:
     def create_swap(self):
         self._print_header("Configuração de Memória Swap")
         
-        # Verificar se já existe swap
         swap_exists = self._get_command_output("swapon --show")
         if swap_exists:
             self._print_info("Memória swap já existe no sistema.")
             return
         
         if self._ask("💾 Deseja criar uma memória swap?"):
-            # Opções de tamanho
             sizes = ["2G", "4G", "8G", "16G", "32G"]
             swap_size = self._select_option("Selecione o tamanho da memória swap:", sizes)
             
             self._print_info(f"Criando memória swap de {swap_size}...")
             
-            # Criar e configurar o arquivo swap
             if RICH_AVAILABLE:
                 with Progress(
                     SpinnerColumn(),
@@ -333,7 +325,6 @@ class LinuxSetup:
                     self._execute_command("swapon /swapfile")
                     progress.update(task1, description="Configurando inicialização automática...")
                     
-                    # Adicionar ao fstab para persistir após reinicializações
                     fstab_entry = "/swapfile none swap sw 0 0"
                     if os.path.exists('/etc/fstab'):
                         with open('/etc/fstab', 'r') as f:
@@ -357,7 +348,6 @@ class LinuxSetup:
                 self._execute_command("swapon /swapfile")
                 print("Configurando inicialização automática...")
                 
-                # Adicionar ao fstab para persistir após reinicializações
                 fstab_entry = "/swapfile none swap sw 0 0"
                 if os.path.exists('/etc/fstab'):
                     with open('/etc/fstab', 'r') as f:
@@ -436,7 +426,6 @@ class LinuxSetup:
         self._print_header("Configuração de Certificado SSL")
         
         if self._ask("🔐 Deseja configurar um certificado SSL gratuito?"):
-            # Verificar se o certbot está instalado ou instalá-lo
             if not shutil.which('certbot'):
                 self._print_info("Instalando Certbot...")
                 
@@ -463,7 +452,6 @@ class LinuxSetup:
                     else:
                         self._execute_command("apt-get install -y certbot || dnf install -y certbot || yum install -y certbot || pacman -S --noconfirm certbot")
             
-            # Perguntar qual método usar: domínio ou IP
             method = self._select_option("Selecione o método para obter o certificado SSL:", 
                                         ["Domínio (recomendado)", "IP (autossignado)"])
             
@@ -485,7 +473,6 @@ class LinuxSetup:
                     print(f"Obtendo certificado para {domain}...")
                     self._execute_command(f"certbot certonly --standalone -d {domain} --email {email} --agree-tos --non-interactive")
                 
-                # Configuração da renovação automática
                 cron_job = "0 3 * * * root certbot renew --quiet"
                 with open('/etc/cron.d/certbot', 'w') as f:
                     f.write(f"SHELL=/bin/sh\n")
@@ -495,12 +482,11 @@ class LinuxSetup:
                 self._print_success(f"Certificado SSL para {domain} instalado com sucesso!")
                 self._print_info(f"Certificados armazenados em: /etc/letsencrypt/live/{domain}/")
                 
-            else:  # Método IP (autossignado)
+            else: 
                 ip = input("Digite o endereço IP do servidor: ")
                 try:
-                    ipaddress.ip_address(ip)  # Validar se é um IP válido
+                    ipaddress.ip_address(ip)  
                     
-                    # Gerar certificado autossignado
                     cert_dir = "/etc/ssl/private"
                     if not os.path.exists(cert_dir):
                         os.makedirs(cert_dir)
@@ -531,14 +517,13 @@ class LinuxSetup:
         
         if self._ask("🔌 Deseja desativar serviços não necessários para liberar recursos?"):
             services_to_disable = [
-                'cups-browsed',  # Impressoras
-                'avahi-daemon',  # Descoberta de serviços na rede
-                'bluetooth',     # Bluetooth
-                'ModemManager',  # Gestor de modems
-                'wpa_supplicant' # WiFi (cuidado se estiver usando WiFi)
+                'cups-browsed',  
+                'avahi-daemon', 
+                'bluetooth',    
+                'ModemManager', 
+                'wpa_supplicant' 
             ]
             
-            # Perguntar ao usuário quais serviços deseja desativar
             selected_services = []
             for service in services_to_disable:
                 if self._ask(f"Deseja desativar o serviço {service}?"):
@@ -598,7 +583,6 @@ class LinuxSetup:
             display_options = [desc for _, desc in locales]
             selected_option = self._select_option("Selecione o idioma do sistema:", display_options)
             
-            # Encontrar o locale correspondente à opção selecionada
             for locale_code, desc in locales:
                 if desc == selected_option:
                     new_locale = locale_code
@@ -701,7 +685,6 @@ class LinuxSetup:
                             f.write(f"{new_locale} UTF-8\n")
                         self._execute_command("locale-gen")
             
-            # Atualizar variáveis de ambiente para a sessão atual
             os.environ['LANG'] = new_locale
             os.environ['LANGUAGE'] = new_locale
             os.environ['LC_ALL'] = new_locale
@@ -721,7 +704,6 @@ class LinuxSetup:
             try:
                 subprocess.check_call([sys.executable, "-m", "pip", "install", "rich", "tqdm"])
                 print("Biblioteca 'rich' instalada! Reiniciando o script...")
-                # Reiniciar o script para aplicar a nova biblioteca
                 os.execv(sys.executable, ['python3'] + sys.argv)
                 return True
             except Exception as e:
@@ -731,17 +713,13 @@ class LinuxSetup:
 
     def run(self):
         """Executa todas as etapas do setup"""
-        # Verificar se é root
         self._check_root()
         
-        # Tentar instalar rich para interface melhorada
         if not RICH_AVAILABLE:
             self.install_rich_if_needed()
         
-        # Mostrar banner
         self.show_banner()
         
-        # Atualizar sistema e instalar dependências básicas
         self._print_header("Preparando o Sistema")
         if RICH_AVAILABLE:
             with Progress(SpinnerColumn(), TextColumn("[bold blue]Atualizando repositórios...")) as progress:
@@ -754,7 +732,6 @@ class LinuxSetup:
         basic_deps = ['wget', 'curl', 'ca-certificates', 'openssl']
         self._install_deps(basic_deps)
         
-        # Menu principal com as funcionalidades disponíveis
         options = [
             ("1", "🔑 Configurar Acesso SSH para Root", self.configure_root_ssh),
             ("2", "⏳ Desativar Timeout do SSH", self.disable_ssh_timeout),
@@ -786,11 +763,10 @@ class LinuxSetup:
                 
                 choice = input("\nEscolha uma opção: ")
             
-            if choice == all_option:  # Executar Todas
+            if choice == all_option:  
                 for _, _, func in options:
                     func()
                 
-                # Perguntar se deseja reiniciar
                 if self._ask("\n🔄 Deseja reiniciar o sistema para aplicar todas as alterações?"):
                     self._print_info("Reiniciando o sistema em 5 segundos...")
                     time.sleep(5)
@@ -799,12 +775,11 @@ class LinuxSetup:
                     self._print_info("Lembre-se que algumas alterações só serão aplicadas após reiniciar o sistema.")
                 break
                 
-            elif choice == exit_option:  # Sair
+            elif choice == exit_option:  
                 self._print_info("Encerrando o programa. Até a próxima! 👋")
                 break
                 
             else:
-                # Executar a função correspondente à opção escolhida
                 for opt_num, _, func in options:
                     if choice == opt_num:
                         func()
