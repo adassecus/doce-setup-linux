@@ -11,15 +11,15 @@ Bem-vindo ao **DoceSetup**, o seu assistente amigável e eficiente para configur
    ```
    Caso não esteja instalado, você pode instalá-lo com:
 
-   Para sistemas baseados em Debian/Ubuntu
+   Debian/Ubuntu:
    ```bash
    sudo apt update && sudo apt install -y python3
    ```
-   Para sistemas baseados em RHEL/CentOS/Fedora
+   RHEL/CentOS/Fedora:
    ```bash
    sudo dnf install -y python3 || sudo yum install -y python3
    ```
-   Para sistemas baseados em Arch
+   Arch:
    ```bash
    sudo pacman -S python
    ```
