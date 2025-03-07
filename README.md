@@ -10,7 +10,6 @@ O DoceSetup é um script de configuração simplificado para seu servidor Linux.
 - **Arquitetura 32 bits**: Ative suporte a aplicativos de 32 bits no seu sistema
 - **Certificado SSL**: Configure certificados SSL gratuitos (com domínio ou autossignados)
 - **Serviços Desnecessários**: Desative serviços não utilizados para liberar recursos
-- **Idioma do Sistema**: Altere facilmente o idioma do sistema com suporte a diversos idiomas
 
 ## Requisitos
 
