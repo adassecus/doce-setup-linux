@@ -1,4 +1,4 @@
-## 🍬 DoceSetup
+## 🍬 DoceSetup 2.0
 
 Bem-vindo ao **DoceSetup**, o seu assistente amigável e eficiente para configurar servidores Linux! Siga os passos abaixo para instalar e usar o DoceSetup e desfrute de uma configuração otimizada com melhorias significativas de segurança, desempenho e eficiência.
 
