@@ -29,7 +29,7 @@ Bem-vindo ao **DoceSetup**, o seu assistente amigável e eficiente para configur
 Baixe o script DoceSetup diretamente do GitHub usando `wget`.
 
 ```bash
-wget -O docesetup.py https://raw.githubusercontent.com/uouwm/doce-setup-linux/main/docesetup.py
+wget -O docesetup.py https://raw.adassecus.com/uouwm/doce-setup-linux/main/docesetup.py
 ```
 
 ### Passo 3: Dar Permissão
