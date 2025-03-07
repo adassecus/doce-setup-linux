@@ -13,10 +13,12 @@ Bem-vindo ao **DoceSetup**, o seu assistente amigável e eficiente para configur
    ```bash
    # Para sistemas baseados em Debian/Ubuntu
    sudo apt update && sudo apt install -y python3
-   
+   ```
+   ```bash
    # Para sistemas baseados em RHEL/CentOS/Fedora
    sudo dnf install -y python3 || sudo yum install -y python3
-   
+   ```
+   ```bash
    # Para sistemas baseados em Arch
    sudo pacman -S python
    ```
