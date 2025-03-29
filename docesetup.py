@@ -19,6 +19,8 @@ try:
     from rich.panel import Panel
     from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
     from rich.prompt import Prompt, Confirm
+    from rich.table import Table
+    from rich.markdown import Markdown
     from rich import print as rprint
     RICH_AVAILABLE = True
 except ImportError:
@@ -30,7 +32,7 @@ class LinuxSetup:
         self.pkg_manager, self.pkg_update, self.pkg_install = self._setup_package_manager()
         self.console = Console() if RICH_AVAILABLE else None
         self.ssh_port = self._detect_ssh_port()
-        self.script_version = "0.7"
+        self.script_version = "1.0"
         
     def _execute_command(self, command, silent=True):
         try:
@@ -159,7 +161,10 @@ class LinuxSetup:
 
     def _print_header(self, text):
         if RICH_AVAILABLE:
-            self.console.print(Panel(f"[bold cyan]{text}[/]", expand=False))
+            self.console.print(Panel(f"[bold cyan]{text}[/]", 
+                                     expand=False, 
+                                     border_style="blue", 
+                                     padding=(1, 2)))
         else:
             print(f"\n==== {text} ====\n")
 
@@ -180,6 +185,12 @@ class LinuxSetup:
             self.console.print(f"[blue]ℹ {text}[/]")
         else:
             print(f"ℹ {text}")
+
+    def _print_warning(self, text):
+        if RICH_AVAILABLE:
+            self.console.print(f"[bold yellow]⚠ {text}[/]")
+        else:
+            print(f"⚠ {text}")
 
     def _ask(self, question):
         if RICH_AVAILABLE:
@@ -217,14 +228,15 @@ class LinuxSetup:
         if RICH_AVAILABLE:
             self.console.print(Panel.fit(
                 f"[bold yellow]🍬 Doce Setup v{self.script_version}[/]\n"
-                f"[cyan]Sistema detectado: {self.distro} {self.version}[/]",
+                f"[cyan]Sistema detectado: {self.distro.capitalize()} {self.version}[/]",
                 padding=(1, 15),
-                title="Bem-vindo!",
+                title="[bold blue]Bem-vindo ao Setup![/]",
+                subtitle="[italic]Configuração simplificada para servidores Linux[/]",
                 border_style="blue"
             ))
         else:
             print(f"\n==== 🍬 Doce Setup v{self.script_version} ====")
-            print(f"Sistema detectado: {self.distro} {self.version}\n")
+            print(f"Sistema detectado: {self.distro.capitalize()} {self.version}\n")
 
     def configure_root_ssh(self):
         self._print_header("Configuração de Acesso SSH para Root")
@@ -266,6 +278,7 @@ class LinuxSetup:
                 self._execute_command("systemctl restart sshd || service sshd restart || /etc/init.d/ssh restart")
             
             self._print_success("Acesso SSH para root configurado com sucesso!")
+            self._print_info(f"Porta SSH atual: {self.ssh_port}")
         else:
             self._print_info("Configuração de acesso SSH para root ignorada.")
 
@@ -289,6 +302,7 @@ class LinuxSetup:
                     self._execute_command("systemctl restart sshd || service sshd restart || /etc/init.d/ssh restart")
                 
                 self._print_success("Timeout do SSH desativado com sucesso!")
+                self._print_info("As sessões SSH agora permanecerão ativas por aproximadamente 5 horas.")
             else:
                 self._print_error("Arquivo de configuração SSH não encontrado.")
         else:
@@ -300,6 +314,11 @@ class LinuxSetup:
         swap_exists = self._get_command_output("swapon --show")
         if swap_exists:
             self._print_info("Memória swap já existe no sistema.")
+            swap_info = self._get_command_output("free -h | grep Swap")
+            if RICH_AVAILABLE:
+                self.console.print(f"[green]Info de Swap: {swap_info}[/]")
+            else:
+                print(f"Info de Swap: {swap_info}")
             return
         
         if self._ask("💾 Deseja criar uma memória swap?"):
@@ -362,6 +381,13 @@ class LinuxSetup:
                             f.write(f'\n{fstab_entry}\n')
             
             self._print_success(f"Memória swap de {swap_size} criada e configurada com sucesso!")
+            
+            # Mostrar a nova configuração de swap
+            new_swap_info = self._get_command_output("free -h | grep Swap")
+            if RICH_AVAILABLE:
+                self.console.print(f"[green]Nova Info de Swap: {new_swap_info}[/]")
+            else:
+                print(f"Nova Info de Swap: {new_swap_info}")
         else:
             self._print_info("Configuração de memória swap ignorada.")
 
@@ -419,20 +445,31 @@ class LinuxSetup:
                     self._execute_command("apt-get install -y libc6:i386 libncurses5:i386 libstdc++6:i386 || echo 'Não foi possível instalar bibliotecas de compatibilidade'")
             
             self._print_success("Arquitetura 32 bits ativada com sucesso!")
+            self._print_info("Agora você poderá executar aplicativos 32 bits em seu sistema.")
         else:
             self._print_info("Ativação da arquitetura 32 bits ignorada.")
 
     def configure_ssl_certificate(self):
-    self._print_header("Configuração de Certificado SSL")
-    
-    if self._ask("🔐 Deseja configurar um certificado SSL gratuito?"):
-        if not shutil.which('certbot'):
-            self._print_info("Instalando Certbot...")
-            
-            if RICH_AVAILABLE:
-                with Progress(SpinnerColumn(), TextColumn("[bold blue]Instalando Certbot...")) as progress:
-                    task = progress.add_task("instalando", total=None)
-                    
+        self._print_header("Configuração de Certificado SSL")
+        
+        if self._ask("🔐 Deseja configurar um certificado SSL gratuito?"):
+            if not shutil.which('certbot'):
+                self._print_info("Instalando Certbot...")
+                
+                if RICH_AVAILABLE:
+                    with Progress(SpinnerColumn(), TextColumn("[bold blue]Instalando Certbot...")) as progress:
+                        task = progress.add_task("instalando", total=None)
+                        
+                        if self.distro in ['ubuntu', 'debian', 'linuxmint', 'pop', 'elementary', 'zorin']:
+                            self._execute_command("apt-get install -y certbot python3-certbot-apache")
+                        elif self.distro in ['fedora', 'centos', 'rhel', 'rocky', 'almalinux']:
+                            self._execute_command("dnf install -y certbot || yum install -y certbot")
+                        elif self.distro in ['arch', 'manjaro', 'endeavouros']:
+                            self._execute_command("pacman -S --noconfirm certbot")
+                        else:
+                            self._execute_command("apt-get install -y certbot || dnf install -y certbot || yum install -y certbot || pacman -S --noconfirm certbot")
+                else:
+                    print("Instalando Certbot...")
                     if self.distro in ['ubuntu', 'debian', 'linuxmint', 'pop', 'elementary', 'zorin']:
                         self._execute_command("apt-get install -y certbot python3-certbot-apache")
                     elif self.distro in ['fedora', 'centos', 'rhel', 'rocky', 'almalinux']:
@@ -441,65 +478,70 @@ class LinuxSetup:
                         self._execute_command("pacman -S --noconfirm certbot")
                     else:
                         self._execute_command("apt-get install -y certbot || dnf install -y certbot || yum install -y certbot || pacman -S --noconfirm certbot")
+            
+            self._print_info("Somente certificados baseados em domínio estão disponíveis, pois são reconhecidos pelos navegadores sem avisos de segurança, diferente de certificados baseados em IP.")
+            
+            email = input("Digite seu email para notificações de segurança e renovação: ")
+            
+            domains = []
+            while True:
+                domain = input("Digite um domínio ou subdomínio (ex: seudominio.com, sub.seudominio.com) ou deixe vazio para finalizar: ")
+                if not domain:
+                    break
+                    
+                if domain.replace('.', '').isdigit():
+                    self._print_error("Domínio inválido. Por favor, use um nome de domínio válido.")
+                    continue
+                    
+                domains.append(domain)
+                self._print_info(f"Domínio '{domain}' adicionado à lista.")
+            
+            if not domains:
+                self._print_error("Nenhum domínio foi especificado. A configuração SSL foi cancelada.")
+                return
+            
+            domains_str = " ".join([f"-d {d}" for d in domains])
+            primary_domain = domains[0]
+            
+            self._print_info(f"Configurando certificado SSL para: {', '.join(domains)}...")
+            
+            if RICH_AVAILABLE:
+                with Progress(SpinnerColumn(), TextColumn(f"[bold blue]Obtendo certificado para {len(domains)} domínio(s)...")) as progress:
+                    task = progress.add_task("obtendo", total=None)
+                    self._execute_command(f"certbot certonly --standalone {domains_str} --email {email} --agree-tos --non-interactive")
             else:
-                print("Instalando Certbot...")
-                if self.distro in ['ubuntu', 'debian', 'linuxmint', 'pop', 'elementary', 'zorin']:
-                    self._execute_command("apt-get install -y certbot python3-certbot-apache")
-                elif self.distro in ['fedora', 'centos', 'rhel', 'rocky', 'almalinux']:
-                    self._execute_command("dnf install -y certbot || yum install -y certbot")
-                elif self.distro in ['arch', 'manjaro', 'endeavouros']:
-                    self._execute_command("pacman -S --noconfirm certbot")
-                else:
-                    self._execute_command("apt-get install -y certbot || dnf install -y certbot || yum install -y certbot || pacman -S --noconfirm certbot")
-        
-        self._print_info("Somente certificados baseados em domínio estão disponíveis, pois são reconhecidos pelos navegadores sem avisos de segurança, diferente de certificados baseados em IP.")
-        
-        email = input("Digite seu email para notificações de segurança e renovação: ")
-        
-        domains = []
-        while True:
-            domain = input("Digite um domínio ou subdomínio (ex: seudominio.com, sub.seudominio.com) ou deixe vazio para finalizar: ")
-            if not domain:
-                break
-                
-            if domain.replace('.', '').isdigit():
-                self._print_error("Domínio inválido. Por favor, use um nome de domínio válido.")
-                continue
-                
-            domains.append(domain)
-            self._print_info(f"Domínio '{domain}' adicionado à lista.")
-        
-        if not domains:
-            self._print_error("Nenhum domínio foi especificado. A configuração SSL foi cancelada.")
-            return
-        
-        domains_str = " ".join([f"-d {d}" for d in domains])
-        primary_domain = domains[0]
-        
-        self._print_info(f"Configurando certificado SSL para: {', '.join(domains)}...")
-        
-        if RICH_AVAILABLE:
-            with Progress(SpinnerColumn(), TextColumn(f"[bold blue]Obtendo certificado para {len(domains)} domínio(s)...")) as progress:
-                task = progress.add_task("obtendo", total=None)
+                print(f"Obtendo certificado para {len(domains)} domínio(s)...")
                 self._execute_command(f"certbot certonly --standalone {domains_str} --email {email} --agree-tos --non-interactive")
+            
+            cron_job = "0 3 * * * root certbot renew --quiet"
+            with open('/etc/cron.d/certbot', 'w') as f:
+                f.write(f"SHELL=/bin/sh\n")
+                f.write(f"PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin\n")
+                f.write(f"{cron_job}\n")
+            
+            self._print_success(f"Certificado SSL para {len(domains)} domínio(s) instalado com sucesso!")
+            self._print_info(f"Certificados armazenados em: /etc/letsencrypt/live/{primary_domain}/")
+            self._print_info("A renovação automática foi configurada para ocorrer diariamente às 3h da manhã.")
+            
+            # Exibir informações dos caminhos dos certificados
+            if RICH_AVAILABLE:
+                cert_info = Table(title="Informações do Certificado SSL")
+                cert_info.add_column("Arquivo", style="cyan")
+                cert_info.add_column("Caminho", style="green")
+                cert_info.add_row("Certificado", f"/etc/letsencrypt/live/{primary_domain}/fullchain.pem")
+                cert_info.add_row("Chave Privada", f"/etc/letsencrypt/live/{primary_domain}/privkey.pem")
+                cert_info.add_row("Cadeia", f"/etc/letsencrypt/live/{primary_domain}/chain.pem")
+                self.console.print(cert_info)
+            else:
+                print("\nInformações do Certificado SSL:")
+                print(f"Certificado: /etc/letsencrypt/live/{primary_domain}/fullchain.pem")
+                print(f"Chave Privada: /etc/letsencrypt/live/{primary_domain}/privkey.pem")
+                print(f"Cadeia: /etc/letsencrypt/live/{primary_domain}/chain.pem")
+            
+            if self._ask("Deseja adicionar outro certificado para diferentes domínios?"):
+                self.configure_ssl_certificate()
         else:
-            print(f"Obtendo certificado para {len(domains)} domínio(s)...")
-            self._execute_command(f"certbot certonly --standalone {domains_str} --email {email} --agree-tos --non-interactive")
-        
-        cron_job = "0 3 * * * root certbot renew --quiet"
-        with open('/etc/cron.d/certbot', 'w') as f:
-            f.write(f"SHELL=/bin/sh\n")
-            f.write(f"PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin\n")
-            f.write(f"{cron_job}\n")
-        
-        self._print_success(f"Certificado SSL para {len(domains)} domínio(s) instalado com sucesso!")
-        self._print_info(f"Certificados armazenados em: /etc/letsencrypt/live/{primary_domain}/")
-        self._print_info("A renovação automática foi configurada para ocorrer diariamente às 3h da manhã.")
-        
-        if self._ask("Deseja adicionar outro certificado para diferentes domínios?"):
-            self.configure_ssl_certificate()
-    else:
-        self._print_info("Configuração do certificado SSL ignorada.")
+            self._print_info("Configuração do certificado SSL ignorada.")
 
     def disable_services(self):
         self._print_header("Desativação de Serviços Desnecessários")
@@ -513,6 +555,28 @@ class LinuxSetup:
                 'wpa_supplicant' 
             ]
             
+            # Mostrar descrições dos serviços
+            if RICH_AVAILABLE:
+                services_table = Table(title="Serviços Disponíveis para Desativação")
+                services_table.add_column("Serviço", style="cyan")
+                services_table.add_column("Descrição", style="green")
+                
+                services_table.add_row("cups-browsed", "Descoberta de impressoras na rede")
+                services_table.add_row("avahi-daemon", "Descoberta de serviços na rede local")
+                services_table.add_row("bluetooth", "Suporte a dispositivos Bluetooth")
+                services_table.add_row("ModemManager", "Gerenciamento de modems e conexões móveis")
+                services_table.add_row("wpa_supplicant", "Cliente para redes Wi-Fi")
+                
+                self.console.print(services_table)
+            else:
+                print("\nServiços Disponíveis para Desativação:")
+                print("cups-browsed - Descoberta de impressoras na rede")
+                print("avahi-daemon - Descoberta de serviços na rede local")
+                print("bluetooth - Suporte a dispositivos Bluetooth")
+                print("ModemManager - Gerenciamento de modems e conexões móveis")
+                print("wpa_supplicant - Cliente para redes Wi-Fi")
+                print("")
+            
             selected_services = []
             for service in services_to_disable:
                 if self._ask(f"Deseja desativar o serviço {service}?"):
@@ -522,7 +586,7 @@ class LinuxSetup:
                 self._print_info("Nenhum serviço selecionado para desativação.")
                 return
             
-            self._print_info("Desativando serviços selecionados...")
+            self._print_info(f"Desativando {len(selected_services)} serviços selecionados...")
             
             if RICH_AVAILABLE:
                 with Progress(
@@ -547,12 +611,12 @@ class LinuxSetup:
                     self._execute_command(f"systemctl stop {service}")
                     self._execute_command(f"systemctl mask {service}")
         
-            self._print_success("Serviços desnecessários desativados com sucesso!")
+            self._print_success(f"{len(selected_services)} serviços desativados com sucesso!")
+            self._print_info("Os serviços não iniciarão mais na inicialização do sistema.")
         else:
             self._print_info("Desativação de serviços ignorada.")
             
     def install_rich_if_needed(self):
-        """Tenta instalar o pacote Rich se estiver faltando para melhorar a interface"""
         try:
             import rich
             return True
@@ -569,7 +633,6 @@ class LinuxSetup:
                 return False
 
     def run(self):
-        """Executa todas as etapas do setup"""
         self._check_root()
         
         if not RICH_AVAILABLE:
@@ -605,10 +668,15 @@ class LinuxSetup:
             self._print_header("Menu Principal")
             
             if RICH_AVAILABLE:
-                for opt_num, opt_name, _ in options:
-                    self.console.print(f"[cyan]{opt_num}[/] - {opt_name}")
-                self.console.print(f"[yellow]{all_option}[/] - 🔄 Executar Todas as Configurações")
-                self.console.print(f"[red]{exit_option}[/] - ❌ Sair")
+                menu_panel = Panel(
+                    "\n".join([f"[cyan]{opt[0]}[/] - {opt[1]}" for opt in options]) + 
+                    f"\n\n[yellow]{all_option}[/] - 🔄 Executar Todas as Configurações" +
+                    f"\n[red]{exit_option}[/] - ❌ Sair",
+                    title="Opções Disponíveis",
+                    border_style="blue",
+                    padding=(1, 2)
+                )
+                self.console.print(menu_panel)
                 
                 choice = Prompt.ask("\nEscolha uma opção", choices=[opt[0] for opt in options] + [all_option, exit_option])
             else:
@@ -643,6 +711,7 @@ class LinuxSetup:
                 
                 input("\nPressione Enter para continuar...")
                 os.system('clear')
+                self.show_banner()
 
 
 if __name__ == "__main__":
