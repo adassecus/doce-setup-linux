@@ -32,7 +32,7 @@ class LinuxSetup:
         self.pkg_manager, self.pkg_update, self.pkg_install = self._setup_package_manager()
         self.console = Console() if RICH_AVAILABLE else None
         self.ssh_port = self._detect_ssh_port()
-        self.script_version = "1.0"
+        self.script_version = "1.1"
         
     def _execute_command(self, command, silent=True):
         try:
@@ -311,7 +311,9 @@ class LinuxSetup:
     def create_swap(self):
         self._print_header("Configuração de Memória Swap")
         
+       
         swap_exists = self._get_command_output("swapon --show")
+        
         if swap_exists:
             self._print_info("Memória swap já existe no sistema.")
             swap_info = self._get_command_output("free -h | grep Swap")
@@ -319,7 +321,73 @@ class LinuxSetup:
                 self.console.print(f"[green]Info de Swap: {swap_info}[/]")
             else:
                 print(f"Info de Swap: {swap_info}")
-            return
+                
+            
+            if '/swapfile' in swap_exists or '/swap' in swap_exists:
+                if self._ask("Deseja remover a swap existente e criar uma nova?"):
+                   
+                    swap_file = None
+                    for line in swap_exists.splitlines():
+                        if '/swapfile' in line:
+                            swap_file = '/swapfile'
+                            break
+                        elif '/swap' in line:
+                            swap_file = '/swap'
+                            break
+                    
+                    if swap_file:
+                        if RICH_AVAILABLE:
+                            with Progress(
+                                SpinnerColumn(),
+                                TextColumn("[bold blue]Removendo swap existente..."),
+                                BarColumn(),
+                                TextColumn("[bold]{task.description}"),
+                            ) as progress:
+                                task = progress.add_task("[green]Desativando swap...", total=None)
+                                self._execute_command(f"swapoff {swap_file}")
+                                
+                                progress.update(task, description="Removendo entradas do fstab...")
+                                if os.path.exists('/etc/fstab'):
+                                    with open('/etc/fstab', 'r') as f:
+                                        fstab_content = f.read()
+                                    
+                                    fstab_content = re.sub(r'.*swapfile.*\n?', '', fstab_content)
+                                    fstab_content = re.sub(r'.*swap.*\n?', '', fstab_content)
+                                    
+                                    with open('/etc/fstab', 'w') as f:
+                                        f.write(fstab_content)
+                                
+                                progress.update(task, description="Removendo arquivo swap...")
+                                self._execute_command(f"rm -f {swap_file}")
+                        else:
+                            print("Desativando swap...")
+                            self._execute_command(f"swapoff {swap_file}")
+                            
+                            print("Removendo entradas do fstab...")
+                            if os.path.exists('/etc/fstab'):
+                                with open('/etc/fstab', 'r') as f:
+                                    fstab_content = f.read()
+                                
+                                fstab_content = re.sub(r'.*swapfile.*\n?', '', fstab_content)
+                                fstab_content = re.sub(r'.*swap.*\n?', '', fstab_content)
+                                
+                                with open('/etc/fstab', 'w') as f:
+                                    f.write(fstab_content)
+                            
+                            print("Removendo arquivo swap...")
+                            self._execute_command(f"rm -f {swap_file}")
+                        
+                        self._print_success("Swap removida com sucesso!")
+                    else:
+                        self._print_error("Não foi possível identificar o arquivo swap.")
+                        return
+                else:
+                    return
+            else:
+                self._print_warning("A swap existente parece estar em uma partição dedicada e não pode ser facilmente removida.")
+                if not self._ask("Deseja continuar e adicionar mais swap?"):
+                    return
+        
         
         if self._ask("💾 Deseja criar uma memória swap?"):
             sizes = ["2G", "4G", "8G", "16G", "32G"]
@@ -382,7 +450,7 @@ class LinuxSetup:
             
             self._print_success(f"Memória swap de {swap_size} criada e configurada com sucesso!")
             
-            # Mostrar a nova configuração de swap
+           
             new_swap_info = self._get_command_output("free -h | grep Swap")
             if RICH_AVAILABLE:
                 self.console.print(f"[green]Nova Info de Swap: {new_swap_info}[/]")
@@ -449,10 +517,264 @@ class LinuxSetup:
         else:
             self._print_info("Ativação da arquitetura 32 bits ignorada.")
 
+    def _detect_web_server(self):
+        
+        apache_installed = (self._execute_command("which apache2") == 0) or (self._execute_command("which httpd") == 0)
+        apache_running = (self._execute_command("systemctl is-active --quiet apache2") == 0) or (self._execute_command("systemctl is-active --quiet httpd") == 0)
+        
+        
+        nginx_installed = self._execute_command("which nginx") == 0
+        nginx_running = self._execute_command("systemctl is-active --quiet nginx") == 0
+        
+        if apache_running:
+            return "apache"
+        elif nginx_running:
+            return "nginx"
+        elif apache_installed:
+            return "apache"
+        elif nginx_installed:
+            return "nginx"
+        else:
+            return None
+
+    def _configure_nginx_site(self, domain, ssl_cert, ssl_key):
+        nginx_conf = f"""server {{
+    listen 80;
+    listen [::]:80;
+    server_name {domain};
+    return 301 https://$host$request_uri;
+}}
+
+server {{
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name {domain};
+
+    ssl_certificate {ssl_cert};
+    ssl_certificate_key {ssl_key};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    root /var/www/html;
+    index index.html index.htm index.nginx-debian.html;
+
+    location / {{
+        try_files $uri $uri/ =404;
+    }}
+}}
+"""
+        
+        
+        self._execute_command("mkdir -p /etc/nginx/sites-available")
+        self._execute_command("mkdir -p /etc/nginx/sites-enabled")
+        
+        
+        with open(f"/etc/nginx/sites-available/{domain}", "w") as f:
+            f.write(nginx_conf)
+        
+        
+        if not os.path.exists(f"/etc/nginx/sites-enabled/{domain}"):
+            self._execute_command(f"ln -s /etc/nginx/sites-available/{domain} /etc/nginx/sites-enabled/")
+        
+        
+        if os.path.exists("/etc/nginx/sites-enabled/default"):
+            self._execute_command("rm -f /etc/nginx/sites-enabled/default")
+        
+        
+        self._execute_command("mkdir -p /var/www/html")
+        
+        html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>Bem-vindo a {domain}</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; text-align: center; padding: 50px; }}
+        h1 {{ color: #3366cc; }}
+        .container {{ max-width: 800px; margin: 0 auto; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Bem-vindo a {domain}!</h1>
+        <p>Este site está protegido com SSL pelo Certbot.</p>
+        <p>Seu certificado foi instalado com sucesso!</p>
+        <p><small>Configurado com Doce Setup</small></p>
+    </div>
+</body>
+</html>
+"""
+        
+        with open("/var/www/html/index.html", "w") as f:
+            f.write(html_content)
+        
+        
+        if self._execute_command("nginx -t") == 0:
+            self._execute_command("systemctl restart nginx")
+            return True
+        else:
+            self._print_error("Erro na configuração do Nginx. Verifique a sintaxe.")
+            return False
+
+    def _configure_apache_site(self, domain, ssl_cert, ssl_key):
+        apache_conf = f"""<VirtualHost *:80>
+    ServerName {domain}
+    Redirect permanent / https://{domain}/
+</VirtualHost>
+
+<VirtualHost *:443>
+    ServerName {domain}
+    
+    DocumentRoot /var/www/html
+    
+    SSLEngine on
+    SSLCertificateFile {ssl_cert}
+    SSLCertificateKeyFile {ssl_key}
+    
+    <Directory /var/www/html>
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+    
+    ErrorLog ${{APACHE_LOG_DIR}}/error.log
+    CustomLog ${{APACHE_LOG_DIR}}/access.log combined
+</VirtualHost>
+"""
+        
+        
+        apache_conf_dir = "/etc/apache2" if os.path.exists("/etc/apache2") else "/etc/httpd"
+        sites_available = f"{apache_conf_dir}/sites-available"
+        sites_enabled = f"{apache_conf_dir}/sites-enabled"
+        
+        
+        self._execute_command(f"mkdir -p {sites_available}")
+        self._execute_command(f"mkdir -p {sites_enabled}")
+        
+        
+        with open(f"{sites_available}/{domain}.conf", "w") as f:
+            f.write(apache_conf)
+        
+       
+        if os.path.exists(f"{sites_available}/{domain}.conf") and not os.path.exists(f"{sites_enabled}/{domain}.conf"):
+            if os.path.exists("/usr/sbin/a2ensite"):
+                self._execute_command(f"a2ensite {domain}")
+            else:
+                self._execute_command(f"ln -s {sites_available}/{domain}.conf {sites_enabled}/")
+        
+       
+        if os.path.exists("/usr/sbin/a2enmod"):
+            self._execute_command("a2enmod ssl")
+            self._execute_command("a2enmod rewrite")
+        
+       
+        self._execute_command("mkdir -p /var/www/html")
+        
+        html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>Bem-vindo a {domain}</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; text-align: center; padding: 50px; }}
+        h1 {{ color: #3366cc; }}
+        .container {{ max-width: 800px; margin: 0 auto; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Bem-vindo a {domain}!</h1>
+        <p>Este site está protegido com SSL pelo Certbot.</p>
+        <p>Seu certificado foi instalado com sucesso!</p>
+        <p><small>Configurado com Doce Setup</small></p>
+    </div>
+</body>
+</html>
+"""
+        
+        with open("/var/www/html/index.html", "w") as f:
+            f.write(html_content)
+        
+        
+        if self.distro in ['ubuntu', 'debian']:
+            self._execute_command("systemctl restart apache2")
+        else:
+            self._execute_command("systemctl restart httpd")
+            
+        return True
+
     def configure_ssl_certificate(self):
         self._print_header("Configuração de Certificado SSL")
         
         if self._ask("🔐 Deseja configurar um certificado SSL gratuito?"):
+            
+            web_server = self._detect_web_server()
+            
+            if not web_server:
+                self._print_info("Nenhum servidor web detectado. É necessário um servidor web para configurar SSL.")
+                server_options = ["apache", "nginx", "nenhum"]
+                selected_server = self._select_option("Qual servidor web você deseja instalar?", server_options)
+                
+                if selected_server == "nenhum":
+                    self._print_info("Configuração SSL cancelada. É necessário um servidor web para continuar.")
+                    return
+                
+                
+                self._print_info(f"Instalando servidor web {selected_server}...")
+                if RICH_AVAILABLE:
+                    with Progress(SpinnerColumn(), TextColumn(f"[bold blue]Instalando {selected_server}...")) as progress:
+                        task = progress.add_task("instalando", total=None)
+                        
+                        if selected_server == "apache":
+                            if self.distro in ['ubuntu', 'debian', 'linuxmint', 'pop', 'elementary', 'zorin']:
+                                self._execute_command("apt-get install -y apache2")
+                            elif self.distro in ['fedora', 'centos', 'rhel', 'rocky', 'almalinux']:
+                                self._execute_command("dnf install -y httpd mod_ssl")
+                            elif self.distro in ['arch', 'manjaro', 'endeavouros']:
+                                self._execute_command("pacman -S --noconfirm apache")
+                            else:
+                                self._execute_command("apt-get install -y apache2 || dnf install -y httpd || pacman -S --noconfirm apache")
+                        else:  
+                            if self.distro in ['ubuntu', 'debian', 'linuxmint', 'pop', 'elementary', 'zorin']:
+                                self._execute_command("apt-get install -y nginx")
+                            elif self.distro in ['fedora', 'centos', 'rhel', 'rocky', 'almalinux']:
+                                self._execute_command("dnf install -y nginx")
+                            elif self.distro in ['arch', 'manjaro', 'endeavouros']:
+                                self._execute_command("pacman -S --noconfirm nginx")
+                            else:
+                                self._execute_command("apt-get install -y nginx || dnf install -y nginx || pacman -S --noconfirm nginx")
+                else:
+                    print(f"Instalando servidor web {selected_server}...")
+                    if selected_server == "apache":
+                        if self.distro in ['ubuntu', 'debian', 'linuxmint', 'pop', 'elementary', 'zorin']:
+                            self._execute_command("apt-get install -y apache2")
+                        elif self.distro in ['fedora', 'centos', 'rhel', 'rocky', 'almalinux']:
+                            self._execute_command("dnf install -y httpd mod_ssl")
+                        elif self.distro in ['arch', 'manjaro', 'endeavouros']:
+                            self._execute_command("pacman -S --noconfirm apache")
+                        else:
+                            self._execute_command("apt-get install -y apache2 || dnf install -y httpd || pacman -S --noconfirm apache")
+                    else:  
+                        if self.distro in ['ubuntu', 'debian', 'linuxmint', 'pop', 'elementary', 'zorin']:
+                            self._execute_command("apt-get install -y nginx")
+                        elif self.distro in ['fedora', 'centos', 'rhel', 'rocky', 'almalinux']:
+                            self._execute_command("dnf install -y nginx")
+                        elif self.distro in ['arch', 'manjaro', 'endeavouros']:
+                            self._execute_command("pacman -S --noconfirm nginx")
+                        else:
+                            self._execute_command("apt-get install -y nginx || dnf install -y nginx || pacman -S --noconfirm nginx")
+                
+                
+                if selected_server == "apache":
+                    if self.distro in ['ubuntu', 'debian']:
+                        self._execute_command("systemctl enable apache2 && systemctl start apache2")
+                    else:
+                        self._execute_command("systemctl enable httpd && systemctl start httpd")
+                else:  
+                    self._execute_command("systemctl enable nginx && systemctl start nginx")
+                
+                web_server = selected_server
+                self._print_success(f"Servidor web {selected_server} instalado e iniciado com sucesso!")
+
+            
             if not shutil.which('certbot'):
                 self._print_info("Instalando Certbot...")
                 
@@ -460,32 +782,56 @@ class LinuxSetup:
                     with Progress(SpinnerColumn(), TextColumn("[bold blue]Instalando Certbot...")) as progress:
                         task = progress.add_task("instalando", total=None)
                         
+                        if web_server == "apache":
+                            if self.distro in ['ubuntu', 'debian', 'linuxmint', 'pop', 'elementary', 'zorin']:
+                                self._execute_command("apt-get install -y certbot python3-certbot-apache")
+                            elif self.distro in ['fedora', 'centos', 'rhel', 'rocky', 'almalinux']:
+                                self._execute_command("dnf install -y certbot python3-certbot-apache")
+                            else:
+                                self._execute_command("apt-get install -y certbot python3-certbot-apache || dnf install -y certbot python3-certbot-apache || echo 'Não foi possível instalar o plugin Apache para o Certbot'")
+                        else:  
+                            if self.distro in ['ubuntu', 'debian', 'linuxmint', 'pop', 'elementary', 'zorin']:
+                                self._execute_command("apt-get install -y certbot python3-certbot-nginx")
+                            elif self.distro in ['fedora', 'centos', 'rhel', 'rocky', 'almalinux']:
+                                self._execute_command("dnf install -y certbot python3-certbot-nginx")
+                            else:
+                                self._execute_command("apt-get install -y certbot python3-certbot-nginx || dnf install -y certbot python3-certbot-nginx || echo 'Não foi possível instalar o plugin Nginx para o Certbot'")
+                else:
+                    print("Instalando Certbot...")
+                    if web_server == "apache":
                         if self.distro in ['ubuntu', 'debian', 'linuxmint', 'pop', 'elementary', 'zorin']:
                             self._execute_command("apt-get install -y certbot python3-certbot-apache")
                         elif self.distro in ['fedora', 'centos', 'rhel', 'rocky', 'almalinux']:
-                            self._execute_command("dnf install -y certbot || yum install -y certbot")
-                        elif self.distro in ['arch', 'manjaro', 'endeavouros']:
-                            self._execute_command("pacman -S --noconfirm certbot")
+                            self._execute_command("dnf install -y certbot python3-certbot-apache")
                         else:
-                            self._execute_command("apt-get install -y certbot || dnf install -y certbot || yum install -y certbot || pacman -S --noconfirm certbot")
-                else:
-                    print("Instalando Certbot...")
-                    if self.distro in ['ubuntu', 'debian', 'linuxmint', 'pop', 'elementary', 'zorin']:
-                        self._execute_command("apt-get install -y certbot python3-certbot-apache")
-                    elif self.distro in ['fedora', 'centos', 'rhel', 'rocky', 'almalinux']:
-                        self._execute_command("dnf install -y certbot || yum install -y certbot")
-                    elif self.distro in ['arch', 'manjaro', 'endeavouros']:
-                        self._execute_command("pacman -S --noconfirm certbot")
-                    else:
-                        self._execute_command("apt-get install -y certbot || dnf install -y certbot || yum install -y certbot || pacman -S --noconfirm certbot")
+                            self._execute_command("apt-get install -y certbot python3-certbot-apache || dnf install -y certbot python3-certbot-apache || echo 'Não foi possível instalar o plugin Apache para o Certbot'")
+                    else:  
+                        if self.distro in ['ubuntu', 'debian', 'linuxmint', 'pop', 'elementary', 'zorin']:
+                            self._execute_command("apt-get install -y certbot python3-certbot-nginx")
+                        elif self.distro in ['fedora', 'centos', 'rhel', 'rocky', 'almalinux']:
+                            self._execute_command("dnf install -y certbot python3-certbot-nginx")
+                        else:
+                            self._execute_command("apt-get install -y certbot python3-certbot-nginx || dnf install -y certbot python3-certbot-nginx || echo 'Não foi possível instalar o plugin Nginx para o Certbot'")
             
-            self._print_info("Somente certificados baseados em domínio estão disponíveis, pois são reconhecidos pelos navegadores sem avisos de segurança, diferente de certificados baseados em IP.")
+            
+            self._print_info("Somente certificados baseados em domínio estão disponíveis.")
+            self._print_info("Para configurar um certificado SSL, você precisará de:")
+            self._print_info("1. Um domínio apontando para o IP deste servidor")
+            self._print_info("2. As portas 80 e 443 abertas no firewall")
+            
+            
+            self._print_info("Para continuar, forneça as seguintes informações:")
             
             email = input("Digite seu email para notificações de segurança e renovação: ")
             
+            
+            self._print_info("\nVocê deverá adicionar domínios um por vez.")
+            self._print_info("Por exemplo: seudominio.com, depois www.seudominio.com, depois app.seudominio.com")
+            self._print_info("Todos estes domínios devem apontar para o IP deste servidor.")
+            
             domains = []
             while True:
-                domain = input("Digite um domínio ou subdomínio (ex: seudominio.com, sub.seudominio.com) ou deixe vazio para finalizar: ")
+                domain = input("\nDigite UM domínio ou subdomínio (ou deixe vazio para finalizar): ")
                 if not domain:
                     break
                     
@@ -494,24 +840,62 @@ class LinuxSetup:
                     continue
                     
                 domains.append(domain)
-                self._print_info(f"Domínio '{domain}' adicionado à lista.")
+                self._print_info(f"Domínio '{domain}' adicionado à lista. Total: {len(domains)} domínio(s).")
+                if len(domains) > 0:
+                    self._print_info("Continue adicionando domínios um por vez ou deixe vazio para finalizar.")
             
             if not domains:
                 self._print_error("Nenhum domínio foi especificado. A configuração SSL foi cancelada.")
                 return
             
+            self._print_info(f"Configurando certificado SSL para: {', '.join(domains)}...")
+            
+            
+            if web_server == "apache":
+                if self.distro in ['ubuntu', 'debian']:
+                    self._execute_command("systemctl stop apache2")
+                else:
+                    self._execute_command("systemctl stop httpd")
+            else:  
+                self._execute_command("systemctl stop nginx")
+            
+            
             domains_str = " ".join([f"-d {d}" for d in domains])
             primary_domain = domains[0]
-            
-            self._print_info(f"Configurando certificado SSL para: {', '.join(domains)}...")
             
             if RICH_AVAILABLE:
                 with Progress(SpinnerColumn(), TextColumn(f"[bold blue]Obtendo certificado para {len(domains)} domínio(s)...")) as progress:
                     task = progress.add_task("obtendo", total=None)
-                    self._execute_command(f"certbot certonly --standalone {domains_str} --email {email} --agree-tos --non-interactive")
+                    result = self._execute_command(f"certbot certonly --standalone {domains_str} --email {email} --agree-tos --non-interactive", silent=False)
             else:
                 print(f"Obtendo certificado para {len(domains)} domínio(s)...")
-                self._execute_command(f"certbot certonly --standalone {domains_str} --email {email} --agree-tos --non-interactive")
+                result = self._execute_command(f"certbot certonly --standalone {domains_str} --email {email} --agree-tos --non-interactive", silent=False)
+            
+            
+            if not os.path.exists(f"/etc/letsencrypt/live/{primary_domain}/fullchain.pem"):
+                self._print_error("Não foi possível obter o certificado. Verifique se os domínios apontam para este servidor.")
+                
+                
+                if web_server == "apache":
+                    if self.distro in ['ubuntu', 'debian']:
+                        self._execute_command("systemctl start apache2")
+                    else:
+                        self._execute_command("systemctl start httpd")
+                else:  
+                    self._execute_command("systemctl start nginx")
+                    
+                return
+            
+            
+            if web_server == "apache":
+                self._configure_apache_site(primary_domain, 
+                                           f"/etc/letsencrypt/live/{primary_domain}/fullchain.pem", 
+                                           f"/etc/letsencrypt/live/{primary_domain}/privkey.pem")
+            else:  
+                self._configure_nginx_site(primary_domain, 
+                                          f"/etc/letsencrypt/live/{primary_domain}/fullchain.pem", 
+                                          f"/etc/letsencrypt/live/{primary_domain}/privkey.pem")
+            
             
             cron_job = "0 3 * * * root certbot renew --quiet"
             with open('/etc/cron.d/certbot', 'w') as f:
@@ -519,11 +903,12 @@ class LinuxSetup:
                 f.write(f"PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin\n")
                 f.write(f"{cron_job}\n")
             
-            self._print_success(f"Certificado SSL para {len(domains)} domínio(s) instalado com sucesso!")
+            self._print_success(f"Certificado SSL para {len(domains)} domínio(s) instalado e configurado com sucesso!")
+            self._print_info(f"Seu site está disponível em: https://{primary_domain}")
             self._print_info(f"Certificados armazenados em: /etc/letsencrypt/live/{primary_domain}/")
             self._print_info("A renovação automática foi configurada para ocorrer diariamente às 3h da manhã.")
             
-            # Exibir informações dos caminhos dos certificados
+            
             if RICH_AVAILABLE:
                 cert_info = Table(title="Informações do Certificado SSL")
                 cert_info.add_column("Arquivo", style="cyan")
@@ -543,6 +928,111 @@ class LinuxSetup:
         else:
             self._print_info("Configuração do certificado SSL ignorada.")
 
+    def remove_ssl_certificates(self):
+        self._print_header("Remoção de Certificados SSL")
+        
+        
+        cert_list = self._get_command_output("certbot certificates")
+        
+        if "No certificates found" in cert_list or not cert_list:
+            self._print_info("Nenhum certificado SSL encontrado para remover.")
+            return
+        
+        self._print_info("Certificados SSL encontrados:")
+        print(cert_list)
+        
+       
+        domains = []
+        for line in cert_list.splitlines():
+            if "Domains:" in line:
+                domains_str = line.split("Domains:")[1].strip()
+                domains.extend(domains_str.split())
+        
+        if not domains:
+            self._print_info("Não foi possível identificar os domínios dos certificados.")
+            return
+        
+       
+        if len(domains) > 1:
+            remove_all = self._ask("Deseja remover todos os certificados SSL?")
+            
+            if remove_all:
+                if RICH_AVAILABLE:
+                    with Progress(SpinnerColumn(), TextColumn("[bold blue]Removendo todos os certificados...")) as progress:
+                        task = progress.add_task("removendo", total=None)
+                        self._execute_command("certbot delete --non-interactive", silent=False)
+                else:
+                    print("Removendo todos os certificados...")
+                    self._execute_command("certbot delete --non-interactive", silent=False)
+                
+                self._print_success("Todos os certificados SSL foram removidos com sucesso!")
+            else:
+                self._print_info("Escolha um domínio para remover o certificado:")
+                domain = self._select_option("Selecione o domínio:", domains)
+                
+                if RICH_AVAILABLE:
+                    with Progress(SpinnerColumn(), TextColumn(f"[bold blue]Removendo certificado para {domain}...")) as progress:
+                        task = progress.add_task("removendo", total=None)
+                        self._execute_command(f"certbot delete --cert-name {domain} --non-interactive", silent=False)
+                else:
+                    print(f"Removendo certificado para {domain}...")
+                    self._execute_command(f"certbot delete --cert-name {domain} --non-interactive", silent=False)
+                
+                self._print_success(f"Certificado SSL para {domain} removido com sucesso!")
+        else:
+            domain = domains[0]
+            
+            if self._ask(f"Deseja remover o certificado SSL para {domain}?"):
+                if RICH_AVAILABLE:
+                    with Progress(SpinnerColumn(), TextColumn(f"[bold blue]Removendo certificado para {domain}...")) as progress:
+                        task = progress.add_task("removendo", total=None)
+                        self._execute_command(f"certbot delete --cert-name {domain} --non-interactive", silent=False)
+                else:
+                    print(f"Removendo certificado para {domain}...")
+                    self._execute_command(f"certbot delete --cert-name {domain} --non-interactive", silent=False)
+                
+                self._print_success(f"Certificado SSL para {domain} removido com sucesso!")
+            else:
+                self._print_info("Remoção de certificado SSL cancelada.")
+        
+       
+        if self._ask("Deseja também remover as configurações do servidor web?"):
+            web_server = self._detect_web_server()
+            
+            if web_server == "apache":
+                for domain in domains:
+                    apache_conf_dir = "/etc/apache2" if os.path.exists("/etc/apache2") else "/etc/httpd"
+                    sites_available = f"{apache_conf_dir}/sites-available"
+                    sites_enabled = f"{apache_conf_dir}/sites-enabled"
+                    
+                    if os.path.exists(f"{sites_enabled}/{domain}.conf"):
+                        if os.path.exists("/usr/sbin/a2dissite"):
+                            self._execute_command(f"a2dissite {domain}")
+                        else:
+                            self._execute_command(f"rm -f {sites_enabled}/{domain}.conf")
+                    
+                    if os.path.exists(f"{sites_available}/{domain}.conf"):
+                        self._execute_command(f"rm -f {sites_available}/{domain}.conf")
+                
+                
+                if self.distro in ['ubuntu', 'debian']:
+                    self._execute_command("systemctl restart apache2")
+                else:
+                    self._execute_command("systemctl restart httpd")
+            
+            elif web_server == "nginx":
+                for domain in domains:
+                    if os.path.exists(f"/etc/nginx/sites-enabled/{domain}"):
+                        self._execute_command(f"rm -f /etc/nginx/sites-enabled/{domain}")
+                    
+                    if os.path.exists(f"/etc/nginx/sites-available/{domain}"):
+                        self._execute_command(f"rm -f /etc/nginx/sites-available/{domain}")
+                
+                
+                self._execute_command("systemctl restart nginx")
+            
+            self._print_success("Configurações do servidor web removidas com sucesso!")
+
     def disable_services(self):
         self._print_header("Desativação de Serviços Desnecessários")
         
@@ -555,7 +1045,7 @@ class LinuxSetup:
                 'wpa_supplicant' 
             ]
             
-            # Mostrar descrições dos serviços
+            
             if RICH_AVAILABLE:
                 services_table = Table(title="Serviços Disponíveis para Desativação")
                 services_table.add_column("Serviço", style="cyan")
@@ -615,7 +1105,202 @@ class LinuxSetup:
             self._print_info("Os serviços não iniciarão mais na inicialização do sistema.")
         else:
             self._print_info("Desativação de serviços ignorada.")
+
+    def translate_to_portuguese(self):
+        self._print_header("Tradução Completa para Português do Brasil")
+        
+        if self._ask("🌎 Deseja traduzir completamente o sistema para Português do Brasil?"):
+            self._print_info("Configurando localização para pt_BR.UTF-8...")
             
+            if RICH_AVAILABLE:
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[bold blue]Configurando localização..."),
+                    BarColumn(),
+                    TextColumn("[bold]{task.description}"),
+                ) as progress:
+                    task = progress.add_task("[green]Instalando pacotes de idioma...", total=None)
+                    
+                    
+                    if self.distro in ['ubuntu', 'debian', 'linuxmint', 'pop', 'elementary', 'zorin']:
+                        self._execute_command("apt-get install -y locales language-pack-pt language-pack-pt-base language-pack-gnome-pt")
+                    elif self.distro in ['fedora', 'centos', 'rhel', 'rocky', 'almalinux']:
+                        self._execute_command("dnf install -y glibc-langpack-pt langpacks-pt_BR")
+                    elif self.distro in ['arch', 'manjaro', 'endeavouros']:
+                        self._execute_command("pacman -S --noconfirm glibc lib32-glibc")
+                    else:
+                        progress.update(task, description="Tentando método genérico...")
+                        self._execute_command("apt-get install -y locales language-pack-pt language-pack-pt-base || dnf install -y glibc-langpack-pt || echo 'Não foi possível instalar pacotes de idioma'")
+                    
+                    
+                    progress.update(task, description="Gerando locales...")
+                    self._execute_command("locale-gen pt_BR.UTF-8 || echo 'Não foi possível gerar locales'")
+                    
+                    
+                    progress.update(task, description="Configurando variáveis de ambiente...")
+                    
+                    
+                    locale_file = ""
+                    if os.path.exists("/etc/locale.conf"):
+                        locale_file = "/etc/locale.conf"
+                    elif os.path.exists("/etc/default/locale"):
+                        locale_file = "/etc/default/locale"
+                    
+                    if locale_file:
+                        with open(locale_file, 'w') as f:
+                            f.write("LANG=pt_BR.UTF-8\n")
+                            f.write("LANGUAGE=pt_BR:pt:en\n")
+                            f.write("LC_ALL=pt_BR.UTF-8\n")
+                    else:
+                       
+                        with open("/etc/locale.conf", 'w') as f:
+                            f.write("LANG=pt_BR.UTF-8\n")
+                            f.write("LANGUAGE=pt_BR:pt:en\n")
+                            f.write("LC_ALL=pt_BR.UTF-8\n")
+                    
+                    
+                    self._execute_command("update-locale LANG=pt_BR.UTF-8 LANGUAGE=pt_BR:pt:en LC_ALL=pt_BR.UTF-8 || echo 'Não foi possível atualizar locale'")
+                    
+                    
+                    progress.update(task, description="Configurando para todos os usuários...")
+                    
+                    for user in pwd.getpwall():
+                        if user.pw_uid >= 1000 and user.pw_uid < 65534:
+                            home = user.pw_dir
+                            if os.path.exists(home):
+                                
+                                bashrc = os.path.join(home, ".bashrc")
+                                if os.path.exists(bashrc):
+                                    with open(bashrc, 'a') as f:
+                                        f.write("\n# Configuração de idioma\n")
+                                        f.write("export LANG=pt_BR.UTF-8\n")
+                                        f.write("export LANGUAGE=pt_BR:pt:en\n")
+                                        f.write("export LC_ALL=pt_BR.UTF-8\n")
+                                
+                                
+                                zshrc = os.path.join(home, ".zshrc")
+                                if os.path.exists(zshrc):
+                                    with open(zshrc, 'a') as f:
+                                        f.write("\n# Configuração de idioma\n")
+                                        f.write("export LANG=pt_BR.UTF-8\n")
+                                        f.write("export LANGUAGE=pt_BR:pt:en\n")
+                                        f.write("export LC_ALL=pt_BR.UTF-8\n")
+                                
+                                
+                                self._execute_command(f"chown -R {user.pw_name}:{user.pw_name} {home}/.bashrc {home}/.zshrc 2>/dev/null || true")
+                    
+                    
+                    progress.update(task, description="Configurando interface gráfica...")
+                    if self.distro in ['ubuntu', 'debian', 'linuxmint', 'pop', 'elementary', 'zorin']:
+                        self._execute_command("apt-get install -y task-brazilian-portuguese")
+                    
+                    if os.path.exists("/usr/bin/localectl"):
+                        self._execute_command("localectl set-locale LANG=pt_BR.UTF-8")
+                        self._execute_command("localectl set-keymap br-abnt2")
+                    
+                   
+                    if os.path.exists("/etc/X11/xorg.conf.d"):
+                        if not os.path.exists("/etc/X11/xorg.conf.d/00-keyboard.conf"):
+                            with open("/etc/X11/xorg.conf.d/00-keyboard.conf", 'w') as f:
+                                f.write('Section "InputClass"\n')
+                                f.write('    Identifier "system-keyboard"\n')
+                                f.write('    MatchIsKeyboard "on"\n')
+                                f.write('    Option "XkbLayout" "br"\n')
+                                f.write('    Option "XkbVariant" "abnt2"\n')
+                                f.write('EndSection\n')
+            else:
+                print("Instalando pacotes de idioma...")
+                if self.distro in ['ubuntu', 'debian', 'linuxmint', 'pop', 'elementary', 'zorin']:
+                    self._execute_command("apt-get install -y locales language-pack-pt language-pack-pt-base language-pack-gnome-pt")
+                elif self.distro in ['fedora', 'centos', 'rhel', 'rocky', 'almalinux']:
+                    self._execute_command("dnf install -y glibc-langpack-pt langpacks-pt_BR")
+                elif self.distro in ['arch', 'manjaro', 'endeavouros']:
+                    self._execute_command("pacman -S --noconfirm glibc lib32-glibc")
+                else:
+                    print("Tentando método genérico...")
+                    self._execute_command("apt-get install -y locales language-pack-pt language-pack-pt-base || dnf install -y glibc-langpack-pt || echo 'Não foi possível instalar pacotes de idioma'")
+                
+                print("Gerando locales...")
+                self._execute_command("locale-gen pt_BR.UTF-8 || echo 'Não foi possível gerar locales'")
+                
+                print("Configurando variáveis de ambiente...")
+                
+              
+                locale_file = ""
+                if os.path.exists("/etc/locale.conf"):
+                    locale_file = "/etc/locale.conf"
+                elif os.path.exists("/etc/default/locale"):
+                    locale_file = "/etc/default/locale"
+                
+                if locale_file:
+                    with open(locale_file, 'w') as f:
+                        f.write("LANG=pt_BR.UTF-8\n")
+                        f.write("LANGUAGE=pt_BR:pt:en\n")
+                        f.write("LC_ALL=pt_BR.UTF-8\n")
+                else:
+                    
+                    with open("/etc/locale.conf", 'w') as f:
+                        f.write("LANG=pt_BR.UTF-8\n")
+                        f.write("LANGUAGE=pt_BR:pt:en\n")
+                        f.write("LC_ALL=pt_BR.UTF-8\n")
+                
+                
+                self._execute_command("update-locale LANG=pt_BR.UTF-8 LANGUAGE=pt_BR:pt:en LC_ALL=pt_BR.UTF-8 || echo 'Não foi possível atualizar locale'")
+                
+                
+                print("Configurando para todos os usuários...")
+                
+                for user in pwd.getpwall():
+                    if user.pw_uid >= 1000 and user.pw_uid < 65534:
+                        home = user.pw_dir
+                        if os.path.exists(home):
+                            
+                            bashrc = os.path.join(home, ".bashrc")
+                            if os.path.exists(bashrc):
+                                with open(bashrc, 'a') as f:
+                                    f.write("\n# Configuração de idioma\n")
+                                    f.write("export LANG=pt_BR.UTF-8\n")
+                                    f.write("export LANGUAGE=pt_BR:pt:en\n")
+                                    f.write("export LC_ALL=pt_BR.UTF-8\n")
+                            
+                            
+                            zshrc = os.path.join(home, ".zshrc")
+                            if os.path.exists(zshrc):
+                                with open(zshrc, 'a') as f:
+                                    f.write("\n# Configuração de idioma\n")
+                                    f.write("export LANG=pt_BR.UTF-8\n")
+                                    f.write("export LANGUAGE=pt_BR:pt:en\n")
+                                    f.write("export LC_ALL=pt_BR.UTF-8\n")
+                            
+                            
+                            self._execute_command(f"chown -R {user.pw_name}:{user.pw_name} {home}/.bashrc {home}/.zshrc 2>/dev/null || true")
+                
+               
+                print("Configurando interface gráfica...")
+                if self.distro in ['ubuntu', 'debian', 'linuxmint', 'pop', 'elementary', 'zorin']:
+                    self._execute_command("apt-get install -y task-brazilian-portuguese")
+                
+                if os.path.exists("/usr/bin/localectl"):
+                    self._execute_command("localectl set-locale LANG=pt_BR.UTF-8")
+                    self._execute_command("localectl set-keymap br-abnt2")
+                
+              
+                if os.path.exists("/etc/X11/xorg.conf.d"):
+                    if not os.path.exists("/etc/X11/xorg.conf.d/00-keyboard.conf"):
+                        with open("/etc/X11/xorg.conf.d/00-keyboard.conf", 'w') as f:
+                            f.write('Section "InputClass"\n')
+                            f.write('    Identifier "system-keyboard"\n')
+                            f.write('    MatchIsKeyboard "on"\n')
+                            f.write('    Option "XkbLayout" "br"\n')
+                            f.write('    Option "XkbVariant" "abnt2"\n')
+                            f.write('EndSection\n')
+            
+            self._print_success("Sistema configurado para Português do Brasil!")
+            self._print_info("As alterações completas serão visíveis após reiniciar o sistema.")
+            self._print_warning("O teclado também foi configurado para o padrão ABNT2 brasileiro.")
+        else:
+            self._print_info("Tradução do sistema ignorada.")
+
     def install_rich_if_needed(self):
         try:
             import rich
@@ -655,14 +1340,16 @@ class LinuxSetup:
         options = [
             ("1", "🔑 Configurar Acesso SSH para Root", self.configure_root_ssh),
             ("2", "⏳ Desativar Timeout do SSH", self.disable_ssh_timeout),
-            ("3", "💾 Criar Memória Swap", self.create_swap),
+            ("3", "💾 Criar/Remover Memória Swap", self.create_swap),
             ("4", "🏗️ Ativar Arquitetura 32 bits", self.enable_32bit_arch),
             ("5", "🔐 Configurar Certificado SSL", self.configure_ssl_certificate),
-            ("6", "🔌 Desativar Serviços Desnecessários", self.disable_services),
+            ("6", "🗑️ Remover Certificados SSL", self.remove_ssl_certificates),
+            ("7", "🔌 Desativar Serviços Desnecessários", self.disable_services),
+            ("8", "🌎 Traduzir Sistema para Português", self.translate_to_portuguese),
         ]
         
-        all_option = "8"
-        exit_option = "9"
+        all_option = "9"
+        exit_option = "0"
         
         while True:
             self._print_header("Menu Principal")
@@ -689,7 +1376,8 @@ class LinuxSetup:
             
             if choice == all_option:  
                 for _, _, func in options:
-                    func()
+                    if func != self.remove_ssl_certificates:  
+                        func()
                 
                 if self._ask("\n🔄 Deseja reiniciar o sistema para aplicar todas as alterações?"):
                     self._print_info("Reiniciando o sistema em 5 segundos...")
