@@ -473,7 +473,7 @@ class LinuxSetup:
             self._print_error("Nenhum domínio foi especificado. A configuração SSL foi cancelada.")
             return
         
-        domains_str = ",".join([f"-d {d}" for d in domains])
+        domains_str = " ".join([f"-d {d}" for d in domains])
         primary_domain = domains[0]
         
         self._print_info(f"Configurando certificado SSL para: {', '.join(domains)}...")
