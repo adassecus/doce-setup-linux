@@ -12,6 +12,8 @@ from pathlib import Path
 import ipaddress
 from datetime import datetime
 import threading
+import signal
+import atexit
 
 try:
     import tqdm
@@ -32,18 +34,21 @@ class LinuxSetup:
         self.pkg_manager, self.pkg_update, self.pkg_install = self._setup_package_manager()
         self.console = Console() if RICH_AVAILABLE else None
         self.ssh_port = self._detect_ssh_port()
-        self.script_version = "1.1"
+        self.script_version = "1.2"
+        self.register_signal_handlers()
         
-    def _execute_command(self, command, silent=True):
+    def _execute_command(self, command, silent=True, check_output=False):
         try:
-            if silent:
+            if check_output:
+                return subprocess.run(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            elif silent:
                 with open(os.devnull, 'w') as DEVNULL:
                     return subprocess.run(command, shell=True, stdout=DEVNULL, stderr=DEVNULL).returncode
             else:
                 return subprocess.run(command, shell=True).returncode
         except Exception as e:
             self._print_error(f"Erro ao executar comando: {command} - {str(e)}")
-            return -1
+            return -1 if not check_output else None
 
     def _get_command_output(self, command):
         try:
@@ -223,6 +228,20 @@ class LinuxSetup:
                 except ValueError:
                     print("Por favor, digite um número.")
 
+    def register_signal_handlers(self):
+        def handle_exit(signum=None, frame=None):
+            if signum is not None:
+                if signum == signal.SIGINT:
+                    print("\n\nOperação cancelada pelo usuário.")
+                elif signum == signal.SIGTERM:
+                    print("\n\nPrograma terminado.")
+            print("\nFinalizando o script Doce Setup.")
+            sys.exit(0)
+        
+        signal.signal(signal.SIGINT, handle_exit)
+        signal.signal(signal.SIGTERM, handle_exit)
+        atexit.register(handle_exit)
+
     def show_banner(self):
         os.system('clear')
         if RICH_AVAILABLE:
@@ -311,7 +330,6 @@ class LinuxSetup:
     def create_swap(self):
         self._print_header("Configuração de Memória Swap")
         
-       
         swap_exists = self._get_command_output("swapon --show")
         
         if swap_exists:
@@ -322,10 +340,8 @@ class LinuxSetup:
             else:
                 print(f"Info de Swap: {swap_info}")
                 
-            
             if '/swapfile' in swap_exists or '/swap' in swap_exists:
                 if self._ask("Deseja remover a swap existente e criar uma nova?"):
-                   
                     swap_file = None
                     for line in swap_exists.splitlines():
                         if '/swapfile' in line:
@@ -388,7 +404,6 @@ class LinuxSetup:
                 if not self._ask("Deseja continuar e adicionar mais swap?"):
                     return
         
-        
         if self._ask("💾 Deseja criar uma memória swap?"):
             sizes = ["2G", "4G", "8G", "16G", "32G"]
             swap_size = self._select_option("Selecione o tamanho da memória swap:", sizes)
@@ -450,7 +465,6 @@ class LinuxSetup:
             
             self._print_success(f"Memória swap de {swap_size} criada e configurada com sucesso!")
             
-           
             new_swap_info = self._get_command_output("free -h | grep Swap")
             if RICH_AVAILABLE:
                 self.console.print(f"[green]Nova Info de Swap: {new_swap_info}[/]")
@@ -518,10 +532,8 @@ class LinuxSetup:
             self._print_info("Ativação da arquitetura 32 bits ignorada.")
 
     def _detect_web_server(self):
-        
         apache_installed = (self._execute_command("which apache2") == 0) or (self._execute_command("which httpd") == 0)
         apache_running = (self._execute_command("systemctl is-active --quiet apache2") == 0) or (self._execute_command("systemctl is-active --quiet httpd") == 0)
-        
         
         nginx_installed = self._execute_command("which nginx") == 0
         nginx_running = self._execute_command("systemctl is-active --quiet nginx") == 0
@@ -537,8 +549,96 @@ class LinuxSetup:
         else:
             return None
 
-    def _configure_nginx_site(self, domain, ssl_cert, ssl_key):
-        nginx_conf = f"""server {{
+    def _update_nginx_site(self, domain, ssl_cert, ssl_key):
+        self._execute_command("mkdir -p /etc/nginx/sites-available")
+        self._execute_command("mkdir -p /etc/nginx/sites-enabled")
+        
+        config_path = f"/etc/nginx/sites-available/{domain}"
+        ssl_config = f"""
+    ssl_certificate {ssl_cert};
+    ssl_certificate_key {ssl_key};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+"""
+        
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                content = f.read()
+            
+            if "listen 443 ssl" not in content:
+                if "server {" in content and "server_name" in content:
+                    http_block = re.search(r'(server\s*\{[^}]*server_name\s+' + re.escape(domain) + r'[^}]*\})', content, re.DOTALL)
+                    if http_block:
+                        https_block = f"""
+server {{
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name {domain};
+{ssl_config}
+    root /var/www/html;
+    index index.html index.htm index.nginx-debian.html;
+
+    location / {{
+        try_files $uri $uri/ =404;
+    }}
+}}
+"""
+                        redirect_block = f"""
+server {{
+    listen 80;
+    listen [::]:80;
+    server_name {domain};
+    return 301 https://$host$request_uri;
+}}
+"""
+                        content = content.replace(http_block.group(1), redirect_block)
+                        content += https_block
+                    
+                    with open(config_path, 'w') as f:
+                        f.write(content)
+                else:
+                    self._print_warning(f"Arquivo de configuração para {domain} existe mas não está no formato esperado.")
+                    self._print_info("Adicionando configuração SSL como novo bloco server...")
+                    
+                    with open(config_path, 'a') as f:
+                        f.write(f"""
+server {{
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name {domain};
+{ssl_config}
+    root /var/www/html;
+    index index.html index.htm index.nginx-debian.html;
+
+    location / {{
+        try_files $uri $uri/ =404;
+    }}
+}}
+""")
+            elif ssl_cert not in content:
+                with open(config_path, 'r') as f:
+                    lines = f.readlines()
+                
+                new_lines = []
+                ssl_section_added = False
+                
+                for line in lines:
+                    if "listen 443 ssl" in line and not ssl_section_added:
+                        new_lines.append(line)
+                        new_lines.append(f"    ssl_certificate {ssl_cert};\n")
+                        new_lines.append(f"    ssl_certificate_key {ssl_key};\n")
+                        new_lines.append("    ssl_protocols TLSv1.2 TLSv1.3;\n")
+                        new_lines.append("    ssl_ciphers HIGH:!aNULL:!MD5;\n")
+                        ssl_section_added = True
+                    elif "ssl_certificate " in line or "ssl_certificate_key " in line or "ssl_protocols " in line or "ssl_ciphers " in line:
+                        continue
+                    else:
+                        new_lines.append(line)
+                
+                with open(config_path, 'w') as f:
+                    f.writelines(new_lines)
+        else:
+            nginx_conf = f"""server {{
     listen 80;
     listen [::]:80;
     server_name {domain};
@@ -549,12 +649,7 @@ server {{
     listen 443 ssl;
     listen [::]:443 ssl;
     server_name {domain};
-
-    ssl_certificate {ssl_cert};
-    ssl_certificate_key {ssl_key};
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-
+{ssl_config}
     root /var/www/html;
     index index.html index.htm index.nginx-debian.html;
 
@@ -563,50 +658,16 @@ server {{
     }}
 }}
 """
-        
-        
-        self._execute_command("mkdir -p /etc/nginx/sites-available")
-        self._execute_command("mkdir -p /etc/nginx/sites-enabled")
-        
-        
-        with open(f"/etc/nginx/sites-available/{domain}", "w") as f:
-            f.write(nginx_conf)
-        
+            with open(config_path, 'w') as f:
+                f.write(nginx_conf)
         
         if not os.path.exists(f"/etc/nginx/sites-enabled/{domain}"):
             self._execute_command(f"ln -s /etc/nginx/sites-available/{domain} /etc/nginx/sites-enabled/")
         
-        
         if os.path.exists("/etc/nginx/sites-enabled/default"):
             self._execute_command("rm -f /etc/nginx/sites-enabled/default")
         
-        
         self._execute_command("mkdir -p /var/www/html")
-        
-        html_content = f"""<!DOCTYPE html>
-<html>
-<head>
-    <title>Bem-vindo a {domain}</title>
-    <style>
-        body {{ font-family: Arial, sans-serif; text-align: center; padding: 50px; }}
-        h1 {{ color: #3366cc; }}
-        .container {{ max-width: 800px; margin: 0 auto; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Bem-vindo a {domain}!</h1>
-        <p>Este site está protegido com SSL pelo Certbot.</p>
-        <p>Seu certificado foi instalado com sucesso!</p>
-        <p><small>Configurado com Doce Setup</small></p>
-    </div>
-</body>
-</html>
-"""
-        
-        with open("/var/www/html/index.html", "w") as f:
-            f.write(html_content)
-        
         
         if self._execute_command("nginx -t") == 0:
             self._execute_command("systemctl restart nginx")
@@ -615,21 +676,35 @@ server {{
             self._print_error("Erro na configuração do Nginx. Verifique a sintaxe.")
             return False
 
-    def _configure_apache_site(self, domain, ssl_cert, ssl_key):
-        apache_conf = f"""<VirtualHost *:80>
-    ServerName {domain}
-    Redirect permanent / https://{domain}/
-</VirtualHost>
-
+    def _update_apache_site(self, domain, ssl_cert, ssl_key):
+        apache_conf_dir = "/etc/apache2" if os.path.exists("/etc/apache2") else "/etc/httpd"
+        sites_available = f"{apache_conf_dir}/sites-available"
+        sites_enabled = f"{apache_conf_dir}/sites-enabled"
+        
+        self._execute_command(f"mkdir -p {sites_available}")
+        self._execute_command(f"mkdir -p {sites_enabled}")
+        
+        config_path = f"{sites_available}/{domain}.conf"
+        ssl_config = f"""
+    SSLEngine on
+    SSLCertificateFile {ssl_cert}
+    SSLCertificateKeyFile {ssl_key}
+"""
+        
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                content = f.read()
+            
+            if "<VirtualHost *:443>" not in content:
+                if "<VirtualHost " in content:
+                    http_block = re.search(r'(<VirtualHost[^>]*>[^<]*ServerName\s+' + re.escape(domain) + r'[^<]*</VirtualHost>)', content, re.DOTALL)
+                    if http_block:
+                        https_block = f"""
 <VirtualHost *:443>
     ServerName {domain}
     
     DocumentRoot /var/www/html
-    
-    SSLEngine on
-    SSLCertificateFile {ssl_cert}
-    SSLCertificateKeyFile {ssl_key}
-    
+{ssl_config}
     <Directory /var/www/html>
         Options -Indexes +FollowSymLinks
         AllowOverride All
@@ -640,59 +715,94 @@ server {{
     CustomLog ${{APACHE_LOG_DIR}}/access.log combined
 </VirtualHost>
 """
+                        redirect_block = f"""
+<VirtualHost *:80>
+    ServerName {domain}
+    Redirect permanent / https://{domain}/
+</VirtualHost>
+"""
+                        content = content.replace(http_block.group(1), redirect_block)
+                        content += https_block
+                    
+                    with open(config_path, 'w') as f:
+                        f.write(content)
+                else:
+                    self._print_warning(f"Arquivo de configuração para {domain} existe mas não está no formato esperado.")
+                    self._print_info("Adicionando configuração SSL como novo bloco VirtualHost...")
+                    
+                    with open(config_path, 'a') as f:
+                        f.write(f"""
+<VirtualHost *:443>
+    ServerName {domain}
+    
+    DocumentRoot /var/www/html
+{ssl_config}
+    <Directory /var/www/html>
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+    
+    ErrorLog ${{APACHE_LOG_DIR}}/error.log
+    CustomLog ${{APACHE_LOG_DIR}}/access.log combined
+</VirtualHost>
+""")
+            elif ssl_cert not in content:
+                with open(config_path, 'r') as f:
+                    lines = f.readlines()
+                
+                new_lines = []
+                ssl_section_added = False
+                
+                for line in lines:
+                    if "<VirtualHost *:443>" in line and not ssl_section_added:
+                        new_lines.append(line)
+                        new_lines.append("    SSLEngine on\n")
+                        new_lines.append(f"    SSLCertificateFile {ssl_cert}\n")
+                        new_lines.append(f"    SSLCertificateKeyFile {ssl_key}\n")
+                        ssl_section_added = True
+                    elif "SSLEngine " in line or "SSLCertificateFile " in line or "SSLCertificateKeyFile " in line:
+                        continue
+                    else:
+                        new_lines.append(line)
+                
+                with open(config_path, 'w') as f:
+                    f.writelines(new_lines)
+        else:
+            apache_conf = f"""<VirtualHost *:80>
+    ServerName {domain}
+    Redirect permanent / https://{domain}/
+</VirtualHost>
+
+<VirtualHost *:443>
+    ServerName {domain}
+    
+    DocumentRoot /var/www/html
+{ssl_config}
+    <Directory /var/www/html>
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+    
+    ErrorLog ${{APACHE_LOG_DIR}}/error.log
+    CustomLog ${{APACHE_LOG_DIR}}/access.log combined
+</VirtualHost>
+"""
+            with open(config_path, 'w') as f:
+                f.write(apache_conf)
         
-        
-        apache_conf_dir = "/etc/apache2" if os.path.exists("/etc/apache2") else "/etc/httpd"
-        sites_available = f"{apache_conf_dir}/sites-available"
-        sites_enabled = f"{apache_conf_dir}/sites-enabled"
-        
-        
-        self._execute_command(f"mkdir -p {sites_available}")
-        self._execute_command(f"mkdir -p {sites_enabled}")
-        
-        
-        with open(f"{sites_available}/{domain}.conf", "w") as f:
-            f.write(apache_conf)
-        
-       
         if os.path.exists(f"{sites_available}/{domain}.conf") and not os.path.exists(f"{sites_enabled}/{domain}.conf"):
             if os.path.exists("/usr/sbin/a2ensite"):
                 self._execute_command(f"a2ensite {domain}")
             else:
                 self._execute_command(f"ln -s {sites_available}/{domain}.conf {sites_enabled}/")
         
-       
         if os.path.exists("/usr/sbin/a2enmod"):
             self._execute_command("a2enmod ssl")
             self._execute_command("a2enmod rewrite")
         
-       
         self._execute_command("mkdir -p /var/www/html")
-        
-        html_content = f"""<!DOCTYPE html>
-<html>
-<head>
-    <title>Bem-vindo a {domain}</title>
-    <style>
-        body {{ font-family: Arial, sans-serif; text-align: center; padding: 50px; }}
-        h1 {{ color: #3366cc; }}
-        .container {{ max-width: 800px; margin: 0 auto; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Bem-vindo a {domain}!</h1>
-        <p>Este site está protegido com SSL pelo Certbot.</p>
-        <p>Seu certificado foi instalado com sucesso!</p>
-        <p><small>Configurado com Doce Setup</small></p>
-    </div>
-</body>
-</html>
-"""
-        
-        with open("/var/www/html/index.html", "w") as f:
-            f.write(html_content)
-        
         
         if self.distro in ['ubuntu', 'debian']:
             self._execute_command("systemctl restart apache2")
@@ -701,11 +811,52 @@ server {{
             
         return True
 
+    def _parse_certbot_error(self, output):
+        common_errors = {
+            "DNS problem": {
+                "message": "Erro de DNS: O domínio não aponta para este servidor ou o registro DNS não se propagou ainda.",
+                "solution": "Verifique se seu domínio está configurado corretamente nos registros DNS e aponta para o IP deste servidor. Pode ser necessário aguardar a propagação DNS (até 24h em alguns casos)."
+            },
+            "Connection refused": {
+                "message": "Erro de conexão: A porta 80 está bloqueada ou em uso por outro serviço.",
+                "solution": "Verifique se as portas 80 e 443 estão abertas no firewall e não estão sendo usadas por outros serviços."
+            },
+            "invalid domain": {
+                "message": "Domínio inválido: O nome de domínio fornecido não é válido.",
+                "solution": "Verifique a sintaxe do domínio. Use apenas domínios corretamente formatados (ex: example.com, sub.example.com)."
+            },
+            "NXDOMAIN": {
+                "message": "Erro NXDOMAIN: O domínio não existe nos registros DNS.",
+                "solution": "Este domínio não existe ou não está registrado corretamente. Verifique se digitou o nome do domínio corretamente."
+            },
+            "Rate limit": {
+                "message": "Limite de taxa excedido: Muitas solicitações recentes para o mesmo domínio.",
+                "solution": "Let's Encrypt limita a quantidade de certificados emitidos por domínio. Aguarde alguns dias antes de tentar novamente."
+            },
+            "Timeout": {
+                "message": "Tempo limite excedido: O servidor do Let's Encrypt não conseguiu validar seu domínio a tempo.",
+                "solution": "Pode haver problemas de conexão ou configuração. Verifique sua conexão com a internet e configurações de rede."
+            }
+        }
+        
+        error_found = None
+        for key, error_info in common_errors.items():
+            if key.lower() in output.lower():
+                error_found = error_info
+                break
+        
+        if not error_found:
+            error_found = {
+                "message": "Ocorreu um erro desconhecido ao obter o certificado.",
+                "solution": "Verifique se o domínio aponta para este servidor, se as portas 80 e 443 estão abertas, e se não há outros serviços usando estas portas."
+            }
+        
+        return error_found
+
     def configure_ssl_certificate(self):
         self._print_header("Configuração de Certificado SSL")
         
         if self._ask("🔐 Deseja configurar um certificado SSL gratuito?"):
-            
             web_server = self._detect_web_server()
             
             if not web_server:
@@ -716,7 +867,6 @@ server {{
                 if selected_server == "nenhum":
                     self._print_info("Configuração SSL cancelada. É necessário um servidor web para continuar.")
                     return
-                
                 
                 self._print_info(f"Instalando servidor web {selected_server}...")
                 if RICH_AVAILABLE:
@@ -762,7 +912,6 @@ server {{
                         else:
                             self._execute_command("apt-get install -y nginx || dnf install -y nginx || pacman -S --noconfirm nginx")
                 
-                
                 if selected_server == "apache":
                     if self.distro in ['ubuntu', 'debian']:
                         self._execute_command("systemctl enable apache2 && systemctl start apache2")
@@ -774,7 +923,6 @@ server {{
                 web_server = selected_server
                 self._print_success(f"Servidor web {selected_server} instalado e iniciado com sucesso!")
 
-            
             if not shutil.which('certbot'):
                 self._print_info("Instalando Certbot...")
                 
@@ -813,17 +961,14 @@ server {{
                         else:
                             self._execute_command("apt-get install -y certbot python3-certbot-nginx || dnf install -y certbot python3-certbot-nginx || echo 'Não foi possível instalar o plugin Nginx para o Certbot'")
             
-            
             self._print_info("Somente certificados baseados em domínio estão disponíveis.")
             self._print_info("Para configurar um certificado SSL, você precisará de:")
             self._print_info("1. Um domínio apontando para o IP deste servidor")
             self._print_info("2. As portas 80 e 443 abertas no firewall")
             
-            
             self._print_info("Para continuar, forneça as seguintes informações:")
             
             email = input("Digite seu email para notificações de segurança e renovação: ")
-            
             
             self._print_info("\nVocê deverá adicionar domínios um por vez.")
             self._print_info("Por exemplo: seudominio.com, depois www.seudominio.com, depois app.seudominio.com")
@@ -850,7 +995,6 @@ server {{
             
             self._print_info(f"Configurando certificado SSL para: {', '.join(domains)}...")
             
-            
             if web_server == "apache":
                 if self.distro in ['ubuntu', 'debian']:
                     self._execute_command("systemctl stop apache2")
@@ -859,22 +1003,24 @@ server {{
             else:  
                 self._execute_command("systemctl stop nginx")
             
-            
             domains_str = " ".join([f"-d {d}" for d in domains])
             primary_domain = domains[0]
             
+            result = None
             if RICH_AVAILABLE:
                 with Progress(SpinnerColumn(), TextColumn(f"[bold blue]Obtendo certificado para {len(domains)} domínio(s)...")) as progress:
                     task = progress.add_task("obtendo", total=None)
-                    result = self._execute_command(f"certbot certonly --standalone {domains_str} --email {email} --agree-tos --non-interactive", silent=False)
+                    result = self._execute_command(f"certbot certonly --standalone {domains_str} --email {email} --agree-tos --non-interactive", silent=False, check_output=True)
             else:
                 print(f"Obtendo certificado para {len(domains)} domínio(s)...")
-                result = self._execute_command(f"certbot certonly --standalone {domains_str} --email {email} --agree-tos --non-interactive", silent=False)
+                result = self._execute_command(f"certbot certonly --standalone {domains_str} --email {email} --agree-tos --non-interactive", silent=False, check_output=True)
             
-            
-            if not os.path.exists(f"/etc/letsencrypt/live/{primary_domain}/fullchain.pem"):
-                self._print_error("Não foi possível obter o certificado. Verifique se os domínios apontam para este servidor.")
+            if result and not os.path.exists(f"/etc/letsencrypt/live/{primary_domain}/fullchain.pem"):
+                error_output = result.stderr if hasattr(result, 'stderr') else "Erro desconhecido."
+                error_info = self._parse_certbot_error(error_output)
                 
+                self._print_error(f"{error_info['message']}")
+                self._print_info(f"Solução: {error_info['solution']}")
                 
                 if web_server == "apache":
                     if self.distro in ['ubuntu', 'debian']:
@@ -886,16 +1032,14 @@ server {{
                     
                 return
             
-            
             if web_server == "apache":
-                self._configure_apache_site(primary_domain, 
-                                           f"/etc/letsencrypt/live/{primary_domain}/fullchain.pem", 
-                                           f"/etc/letsencrypt/live/{primary_domain}/privkey.pem")
+                self._update_apache_site(primary_domain, 
+                                        f"/etc/letsencrypt/live/{primary_domain}/fullchain.pem", 
+                                        f"/etc/letsencrypt/live/{primary_domain}/privkey.pem")
             else:  
-                self._configure_nginx_site(primary_domain, 
-                                          f"/etc/letsencrypt/live/{primary_domain}/fullchain.pem", 
-                                          f"/etc/letsencrypt/live/{primary_domain}/privkey.pem")
-            
+                self._update_nginx_site(primary_domain, 
+                                      f"/etc/letsencrypt/live/{primary_domain}/fullchain.pem", 
+                                      f"/etc/letsencrypt/live/{primary_domain}/privkey.pem")
             
             cron_job = "0 3 * * * root certbot renew --quiet"
             with open('/etc/cron.d/certbot', 'w') as f:
@@ -907,7 +1051,6 @@ server {{
             self._print_info(f"Seu site está disponível em: https://{primary_domain}")
             self._print_info(f"Certificados armazenados em: /etc/letsencrypt/live/{primary_domain}/")
             self._print_info("A renovação automática foi configurada para ocorrer diariamente às 3h da manhã.")
-            
             
             if RICH_AVAILABLE:
                 cert_info = Table(title="Informações do Certificado SSL")
@@ -931,7 +1074,6 @@ server {{
     def remove_ssl_certificates(self):
         self._print_header("Remoção de Certificados SSL")
         
-        
         cert_list = self._get_command_output("certbot certificates")
         
         if "No certificates found" in cert_list or not cert_list:
@@ -941,7 +1083,6 @@ server {{
         self._print_info("Certificados SSL encontrados:")
         print(cert_list)
         
-       
         domains = []
         for line in cert_list.splitlines():
             if "Domains:" in line:
@@ -952,7 +1093,6 @@ server {{
             self._print_info("Não foi possível identificar os domínios dos certificados.")
             return
         
-       
         if len(domains) > 1:
             remove_all = self._ask("Deseja remover todos os certificados SSL?")
             
@@ -995,7 +1135,6 @@ server {{
             else:
                 self._print_info("Remoção de certificado SSL cancelada.")
         
-       
         if self._ask("Deseja também remover as configurações do servidor web?"):
             web_server = self._detect_web_server()
             
@@ -1014,7 +1153,6 @@ server {{
                     if os.path.exists(f"{sites_available}/{domain}.conf"):
                         self._execute_command(f"rm -f {sites_available}/{domain}.conf")
                 
-                
                 if self.distro in ['ubuntu', 'debian']:
                     self._execute_command("systemctl restart apache2")
                 else:
@@ -1027,7 +1165,6 @@ server {{
                     
                     if os.path.exists(f"/etc/nginx/sites-available/{domain}"):
                         self._execute_command(f"rm -f /etc/nginx/sites-available/{domain}")
-                
                 
                 self._execute_command("systemctl restart nginx")
             
@@ -1044,7 +1181,6 @@ server {{
                 'ModemManager', 
                 'wpa_supplicant' 
             ]
-            
             
             if RICH_AVAILABLE:
                 services_table = Table(title="Serviços Disponíveis para Desativação")
@@ -1121,7 +1257,6 @@ server {{
                 ) as progress:
                     task = progress.add_task("[green]Instalando pacotes de idioma...", total=None)
                     
-                    
                     if self.distro in ['ubuntu', 'debian', 'linuxmint', 'pop', 'elementary', 'zorin']:
                         self._execute_command("apt-get install -y locales language-pack-pt language-pack-pt-base language-pack-gnome-pt")
                     elif self.distro in ['fedora', 'centos', 'rhel', 'rocky', 'almalinux']:
@@ -1132,13 +1267,10 @@ server {{
                         progress.update(task, description="Tentando método genérico...")
                         self._execute_command("apt-get install -y locales language-pack-pt language-pack-pt-base || dnf install -y glibc-langpack-pt || echo 'Não foi possível instalar pacotes de idioma'")
                     
-                    
                     progress.update(task, description="Gerando locales...")
                     self._execute_command("locale-gen pt_BR.UTF-8 || echo 'Não foi possível gerar locales'")
                     
-                    
                     progress.update(task, description="Configurando variáveis de ambiente...")
-                    
                     
                     locale_file = ""
                     if os.path.exists("/etc/locale.conf"):
@@ -1152,15 +1284,12 @@ server {{
                             f.write("LANGUAGE=pt_BR:pt:en\n")
                             f.write("LC_ALL=pt_BR.UTF-8\n")
                     else:
-                       
                         with open("/etc/locale.conf", 'w') as f:
                             f.write("LANG=pt_BR.UTF-8\n")
                             f.write("LANGUAGE=pt_BR:pt:en\n")
                             f.write("LC_ALL=pt_BR.UTF-8\n")
                     
-                    
                     self._execute_command("update-locale LANG=pt_BR.UTF-8 LANGUAGE=pt_BR:pt:en LC_ALL=pt_BR.UTF-8 || echo 'Não foi possível atualizar locale'")
-                    
                     
                     progress.update(task, description="Configurando para todos os usuários...")
                     
@@ -1168,7 +1297,6 @@ server {{
                         if user.pw_uid >= 1000 and user.pw_uid < 65534:
                             home = user.pw_dir
                             if os.path.exists(home):
-                                
                                 bashrc = os.path.join(home, ".bashrc")
                                 if os.path.exists(bashrc):
                                     with open(bashrc, 'a') as f:
@@ -1176,7 +1304,6 @@ server {{
                                         f.write("export LANG=pt_BR.UTF-8\n")
                                         f.write("export LANGUAGE=pt_BR:pt:en\n")
                                         f.write("export LC_ALL=pt_BR.UTF-8\n")
-                                
                                 
                                 zshrc = os.path.join(home, ".zshrc")
                                 if os.path.exists(zshrc):
@@ -1186,9 +1313,7 @@ server {{
                                         f.write("export LANGUAGE=pt_BR:pt:en\n")
                                         f.write("export LC_ALL=pt_BR.UTF-8\n")
                                 
-                                
                                 self._execute_command(f"chown -R {user.pw_name}:{user.pw_name} {home}/.bashrc {home}/.zshrc 2>/dev/null || true")
-                    
                     
                     progress.update(task, description="Configurando interface gráfica...")
                     if self.distro in ['ubuntu', 'debian', 'linuxmint', 'pop', 'elementary', 'zorin']:
@@ -1198,7 +1323,6 @@ server {{
                         self._execute_command("localectl set-locale LANG=pt_BR.UTF-8")
                         self._execute_command("localectl set-keymap br-abnt2")
                     
-                   
                     if os.path.exists("/etc/X11/xorg.conf.d"):
                         if not os.path.exists("/etc/X11/xorg.conf.d/00-keyboard.conf"):
                             with open("/etc/X11/xorg.conf.d/00-keyboard.conf", 'w') as f:
@@ -1225,7 +1349,6 @@ server {{
                 
                 print("Configurando variáveis de ambiente...")
                 
-              
                 locale_file = ""
                 if os.path.exists("/etc/locale.conf"):
                     locale_file = "/etc/locale.conf"
@@ -1238,15 +1361,12 @@ server {{
                         f.write("LANGUAGE=pt_BR:pt:en\n")
                         f.write("LC_ALL=pt_BR.UTF-8\n")
                 else:
-                    
                     with open("/etc/locale.conf", 'w') as f:
                         f.write("LANG=pt_BR.UTF-8\n")
                         f.write("LANGUAGE=pt_BR:pt:en\n")
                         f.write("LC_ALL=pt_BR.UTF-8\n")
                 
-                
                 self._execute_command("update-locale LANG=pt_BR.UTF-8 LANGUAGE=pt_BR:pt:en LC_ALL=pt_BR.UTF-8 || echo 'Não foi possível atualizar locale'")
-                
                 
                 print("Configurando para todos os usuários...")
                 
@@ -1254,7 +1374,6 @@ server {{
                     if user.pw_uid >= 1000 and user.pw_uid < 65534:
                         home = user.pw_dir
                         if os.path.exists(home):
-                            
                             bashrc = os.path.join(home, ".bashrc")
                             if os.path.exists(bashrc):
                                 with open(bashrc, 'a') as f:
@@ -1262,7 +1381,6 @@ server {{
                                     f.write("export LANG=pt_BR.UTF-8\n")
                                     f.write("export LANGUAGE=pt_BR:pt:en\n")
                                     f.write("export LC_ALL=pt_BR.UTF-8\n")
-                            
                             
                             zshrc = os.path.join(home, ".zshrc")
                             if os.path.exists(zshrc):
@@ -1272,10 +1390,8 @@ server {{
                                     f.write("export LANGUAGE=pt_BR:pt:en\n")
                                     f.write("export LC_ALL=pt_BR.UTF-8\n")
                             
-                            
                             self._execute_command(f"chown -R {user.pw_name}:{user.pw_name} {home}/.bashrc {home}/.zshrc 2>/dev/null || true")
                 
-               
                 print("Configurando interface gráfica...")
                 if self.distro in ['ubuntu', 'debian', 'linuxmint', 'pop', 'elementary', 'zorin']:
                     self._execute_command("apt-get install -y task-brazilian-portuguese")
@@ -1284,7 +1400,6 @@ server {{
                     self._execute_command("localectl set-locale LANG=pt_BR.UTF-8")
                     self._execute_command("localectl set-keymap br-abnt2")
                 
-              
                 if os.path.exists("/etc/X11/xorg.conf.d"):
                     if not os.path.exists("/etc/X11/xorg.conf.d/00-keyboard.conf"):
                         with open("/etc/X11/xorg.conf.d/00-keyboard.conf", 'w') as f:
@@ -1318,90 +1433,100 @@ server {{
                 return False
 
     def run(self):
-        self._check_root()
-        
-        if not RICH_AVAILABLE:
-            self.install_rich_if_needed()
-        
-        self.show_banner()
-        
-        self._print_header("Preparando o Sistema")
-        if RICH_AVAILABLE:
-            with Progress(SpinnerColumn(), TextColumn("[bold blue]Atualizando repositórios...")) as progress:
-                task = progress.add_task("atualizando", total=None)
-                self._execute_command(self.pkg_update)
-        else:
-            print("Atualizando repositórios...")
-            self._execute_command(self.pkg_update)
-        
-        basic_deps = ['wget', 'curl', 'ca-certificates', 'openssl']
-        self._install_deps(basic_deps)
-        
-        options = [
-            ("1", "🔑 Configurar Acesso SSH para Root", self.configure_root_ssh),
-            ("2", "⏳ Desativar Timeout do SSH", self.disable_ssh_timeout),
-            ("3", "💾 Criar/Remover Memória Swap", self.create_swap),
-            ("4", "🏗️ Ativar Arquitetura 32 bits", self.enable_32bit_arch),
-            ("5", "🔐 Configurar Certificado SSL", self.configure_ssl_certificate),
-            ("6", "🗑️ Remover Certificados SSL", self.remove_ssl_certificates),
-            ("7", "🔌 Desativar Serviços Desnecessários", self.disable_services),
-            ("8", "🌎 Traduzir Sistema para Português", self.translate_to_portuguese),
-        ]
-        
-        all_option = "9"
-        exit_option = "0"
-        
-        while True:
-            self._print_header("Menu Principal")
+        try:
+            self._check_root()
             
+            if not RICH_AVAILABLE:
+                self.install_rich_if_needed()
+            
+            self.show_banner()
+            
+            self._print_header("Preparando o Sistema")
             if RICH_AVAILABLE:
-                menu_panel = Panel(
-                    "\n".join([f"[cyan]{opt[0]}[/] - {opt[1]}" for opt in options]) + 
-                    f"\n\n[yellow]{all_option}[/] - 🔄 Executar Todas as Configurações" +
-                    f"\n[red]{exit_option}[/] - ❌ Sair",
-                    title="Opções Disponíveis",
-                    border_style="blue",
-                    padding=(1, 2)
-                )
-                self.console.print(menu_panel)
-                
-                choice = Prompt.ask("\nEscolha uma opção", choices=[opt[0] for opt in options] + [all_option, exit_option])
+                with Progress(SpinnerColumn(), TextColumn("[bold blue]Atualizando repositórios...")) as progress:
+                    task = progress.add_task("atualizando", total=None)
+                    self._execute_command(self.pkg_update)
             else:
-                for opt_num, opt_name, _ in options:
-                    print(f"{opt_num} - {opt_name}")
-                print(f"{all_option} - 🔄 Executar Todas as Configurações")
-                print(f"{exit_option} - ❌ Sair")
-                
-                choice = input("\nEscolha uma opção: ")
+                print("Atualizando repositórios...")
+                self._execute_command(self.pkg_update)
             
-            if choice == all_option:  
-                for _, _, func in options:
-                    if func != self.remove_ssl_certificates:  
-                        func()
+            basic_deps = ['wget', 'curl', 'ca-certificates', 'openssl']
+            self._install_deps(basic_deps)
+            
+            options = [
+                ("1", "🔑 Configurar Acesso SSH para Root", self.configure_root_ssh),
+                ("2", "⏳ Desativar Timeout do SSH", self.disable_ssh_timeout),
+                ("3", "💾 Criar/Remover Memória Swap", self.create_swap),
+                ("4", "🏗️ Ativar Arquitetura 32 bits", self.enable_32bit_arch),
+                ("5", "🔐 Configurar Certificado SSL", self.configure_ssl_certificate),
+                ("6", "🗑️ Remover Certificados SSL", self.remove_ssl_certificates),
+                ("7", "🔌 Desativar Serviços Desnecessários", self.disable_services),
+                ("8", "🌎 Traduzir Sistema para Português", self.translate_to_portuguese),
+            ]
+            
+            all_option = "9"
+            exit_option = "0"
+            
+            while True:
+                self._print_header("Menu Principal")
                 
-                if self._ask("\n🔄 Deseja reiniciar o sistema para aplicar todas as alterações?"):
-                    self._print_info("Reiniciando o sistema em 5 segundos...")
-                    time.sleep(5)
-                    self._execute_command("reboot")
+                if RICH_AVAILABLE:
+                    menu_panel = Panel(
+                        "\n".join([f"[cyan]{opt[0]}[/] - {opt[1]}" for opt in options]) + 
+                        f"\n\n[yellow]{all_option}[/] - 🔄 Executar Todas as Configurações" +
+                        f"\n[red]{exit_option}[/] - ❌ Sair",
+                        title="Opções Disponíveis",
+                        border_style="blue",
+                        padding=(1, 2)
+                    )
+                    self.console.print(menu_panel)
+                    
+                    choice = Prompt.ask("\nEscolha uma opção", choices=[opt[0] for opt in options] + [all_option, exit_option])
                 else:
-                    self._print_info("Lembre-se que algumas alterações só serão aplicadas após reiniciar o sistema.")
-                break
+                    for opt_num, opt_name, _ in options:
+                        print(f"{opt_num} - {opt_name}")
+                    print(f"{all_option} - 🔄 Executar Todas as Configurações")
+                    print(f"{exit_option} - ❌ Sair")
+                    
+                    choice = input("\nEscolha uma opção: ")
                 
-            elif choice == exit_option:  
-                self._print_info("Encerrando o programa. Até a próxima! 👋")
-                break
-                
-            else:
-                for opt_num, _, func in options:
-                    if choice == opt_num:
-                        func()
-                        break
-                
-                input("\nPressione Enter para continuar...")
-                os.system('clear')
-                self.show_banner()
+                if choice == all_option:  
+                    for _, _, func in options:
+                        if func != self.remove_ssl_certificates:  
+                            func()
+                    
+                    if self._ask("\n🔄 Deseja reiniciar o sistema para aplicar todas as alterações?"):
+                        self._print_info("Reiniciando o sistema em 5 segundos...")
+                        time.sleep(5)
+                        self._execute_command("reboot")
+                    else:
+                        self._print_info("Lembre-se que algumas alterações só serão aplicadas após reiniciar o sistema.")
+                    break
+                    
+                elif choice == exit_option:  
+                    self._print_info("Encerrando o programa. Até a próxima! 👋")
+                    break
+                    
+                else:
+                    for opt_num, _, func in options:
+                        if choice == opt_num:
+                            func()
+                            break
+                    
+                    input("\nPressione Enter para continuar...")
+                    os.system('clear')
+                    self.show_banner()
+        except KeyboardInterrupt:
+            print("\n\nOperação cancelada pelo usuário.")
+            print("Finalizando o script Doce Setup.")
+            sys.exit(0)
 
 
 if __name__ == "__main__":
-    setup = LinuxSetup()
-    setup.run()
+    try:
+        setup = LinuxSetup()
+        setup.run()
+    except KeyboardInterrupt:
+        print("\n\nOperação cancelada pelo usuário.")
+        print("Finalizando o script Doce Setup.")
+        sys.exit(0)
