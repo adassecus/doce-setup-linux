@@ -423,26 +423,16 @@ class LinuxSetup:
             self._print_info("Ativação da arquitetura 32 bits ignorada.")
 
     def configure_ssl_certificate(self):
-        self._print_header("Configuração de Certificado SSL")
-        
-        if self._ask("🔐 Deseja configurar um certificado SSL gratuito?"):
-            if not shutil.which('certbot'):
-                self._print_info("Instalando Certbot...")
-                
-                if RICH_AVAILABLE:
-                    with Progress(SpinnerColumn(), TextColumn("[bold blue]Instalando Certbot...")) as progress:
-                        task = progress.add_task("instalando", total=None)
-                        
-                        if self.distro in ['ubuntu', 'debian', 'linuxmint', 'pop', 'elementary', 'zorin']:
-                            self._execute_command("apt-get install -y certbot python3-certbot-apache")
-                        elif self.distro in ['fedora', 'centos', 'rhel', 'rocky', 'almalinux']:
-                            self._execute_command("dnf install -y certbot || yum install -y certbot")
-                        elif self.distro in ['arch', 'manjaro', 'endeavouros']:
-                            self._execute_command("pacman -S --noconfirm certbot")
-                        else:
-                            self._execute_command("apt-get install -y certbot || dnf install -y certbot || yum install -y certbot || pacman -S --noconfirm certbot")
-                else:
-                    print("Instalando Certbot...")
+    self._print_header("Configuração de Certificado SSL")
+    
+    if self._ask("🔐 Deseja configurar um certificado SSL gratuito?"):
+        if not shutil.which('certbot'):
+            self._print_info("Instalando Certbot...")
+            
+            if RICH_AVAILABLE:
+                with Progress(SpinnerColumn(), TextColumn("[bold blue]Instalando Certbot...")) as progress:
+                    task = progress.add_task("instalando", total=None)
+                    
                     if self.distro in ['ubuntu', 'debian', 'linuxmint', 'pop', 'elementary', 'zorin']:
                         self._execute_command("apt-get install -y certbot python3-certbot-apache")
                     elif self.distro in ['fedora', 'centos', 'rhel', 'rocky', 'almalinux']:
@@ -451,66 +441,65 @@ class LinuxSetup:
                         self._execute_command("pacman -S --noconfirm certbot")
                     else:
                         self._execute_command("apt-get install -y certbot || dnf install -y certbot || yum install -y certbot || pacman -S --noconfirm certbot")
-            
-            method = self._select_option("Selecione o método para obter o certificado SSL:", 
-                                        ["Domínio (recomendado)", "IP (autossignado)"])
-            
-            if "Domínio" in method:
-                email = input("Digite seu email para notificações de segurança e renovação: ")
-                domain = input("Digite seu domínio (ex: seudominio.com): ")
-                
-                if not domain or domain.replace('.', '').isdigit():
-                    self._print_error("Domínio inválido. A configuração SSL foi cancelada.")
-                    return
-                
-                self._print_info(f"Configurando certificado SSL para {domain}...")
-                
-                if RICH_AVAILABLE:
-                    with Progress(SpinnerColumn(), TextColumn(f"[bold blue]Obtendo certificado para {domain}...")) as progress:
-                        task = progress.add_task("obtendo", total=None)
-                        self._execute_command(f"certbot certonly --standalone -d {domain} --email {email} --agree-tos --non-interactive")
+            else:
+                print("Instalando Certbot...")
+                if self.distro in ['ubuntu', 'debian', 'linuxmint', 'pop', 'elementary', 'zorin']:
+                    self._execute_command("apt-get install -y certbot python3-certbot-apache")
+                elif self.distro in ['fedora', 'centos', 'rhel', 'rocky', 'almalinux']:
+                    self._execute_command("dnf install -y certbot || yum install -y certbot")
+                elif self.distro in ['arch', 'manjaro', 'endeavouros']:
+                    self._execute_command("pacman -S --noconfirm certbot")
                 else:
-                    print(f"Obtendo certificado para {domain}...")
-                    self._execute_command(f"certbot certonly --standalone -d {domain} --email {email} --agree-tos --non-interactive")
+                    self._execute_command("apt-get install -y certbot || dnf install -y certbot || yum install -y certbot || pacman -S --noconfirm certbot")
+        
+        self._print_info("Somente certificados baseados em domínio estão disponíveis, pois são reconhecidos pelos navegadores sem avisos de segurança, diferente de certificados baseados em IP.")
+        
+        email = input("Digite seu email para notificações de segurança e renovação: ")
+        
+        domains = []
+        while True:
+            domain = input("Digite um domínio ou subdomínio (ex: seudominio.com, sub.seudominio.com) ou deixe vazio para finalizar: ")
+            if not domain:
+                break
                 
-                cron_job = "0 3 * * * root certbot renew --quiet"
-                with open('/etc/cron.d/certbot', 'w') as f:
-                    f.write(f"SHELL=/bin/sh\n")
-                    f.write(f"PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin\n")
-                    f.write(f"{cron_job}\n")
+            if domain.replace('.', '').isdigit():
+                self._print_error("Domínio inválido. Por favor, use um nome de domínio válido.")
+                continue
                 
-                self._print_success(f"Certificado SSL para {domain} instalado com sucesso!")
-                self._print_info(f"Certificados armazenados em: /etc/letsencrypt/live/{domain}/")
-                
-            else: 
-                ip = input("Digite o endereço IP do servidor: ")
-                try:
-                    ipaddress.ip_address(ip)  
-                    
-                    cert_dir = "/etc/ssl/private"
-                    if not os.path.exists(cert_dir):
-                        os.makedirs(cert_dir)
-                    
-                    self._print_info("Gerando certificado autossignado...")
-                    
-                    if RICH_AVAILABLE:
-                        with Progress(SpinnerColumn(), TextColumn("[bold blue]Gerando certificado...")) as progress:
-                            task = progress.add_task("gerando", total=None)
-                            self._execute_command(f"openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout {cert_dir}/selfsigned.key -out {cert_dir}/selfsigned.crt -subj '/CN={ip}' -addext 'subjectAltName=IP:{ip}'")
-                    else:
-                        print("Gerando certificado...")
-                        self._execute_command(f"openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout {cert_dir}/selfsigned.key -out {cert_dir}/selfsigned.crt -subj '/CN={ip}' -addext 'subjectAltName=IP:{ip}'")
-                    
-                    self._print_success(f"Certificado autossignado gerado com sucesso!")
-                    self._print_info(f"Certificado armazenado em: {cert_dir}/selfsigned.crt")
-                    self._print_info(f"Chave privada armazenada em: {cert_dir}/selfsigned.key")
-                    self._print_info("Atenção: Este certificado é autossignado e gerará avisos em navegadores.")
-                    
-                except ValueError:
-                    self._print_error("Endereço IP inválido. A configuração SSL foi cancelada.")
-                    return
+            domains.append(domain)
+            self._print_info(f"Domínio '{domain}' adicionado à lista.")
+        
+        if not domains:
+            self._print_error("Nenhum domínio foi especificado. A configuração SSL foi cancelada.")
+            return
+        
+        domains_str = ",".join([f"-d {d}" for d in domains])
+        primary_domain = domains[0]
+        
+        self._print_info(f"Configurando certificado SSL para: {', '.join(domains)}...")
+        
+        if RICH_AVAILABLE:
+            with Progress(SpinnerColumn(), TextColumn(f"[bold blue]Obtendo certificado para {len(domains)} domínio(s)...")) as progress:
+                task = progress.add_task("obtendo", total=None)
+                self._execute_command(f"certbot certonly --standalone {domains_str} --email {email} --agree-tos --non-interactive")
         else:
-            self._print_info("Configuração do certificado SSL ignorada.")
+            print(f"Obtendo certificado para {len(domains)} domínio(s)...")
+            self._execute_command(f"certbot certonly --standalone {domains_str} --email {email} --agree-tos --non-interactive")
+        
+        cron_job = "0 3 * * * root certbot renew --quiet"
+        with open('/etc/cron.d/certbot', 'w') as f:
+            f.write(f"SHELL=/bin/sh\n")
+            f.write(f"PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin\n")
+            f.write(f"{cron_job}\n")
+        
+        self._print_success(f"Certificado SSL para {len(domains)} domínio(s) instalado com sucesso!")
+        self._print_info(f"Certificados armazenados em: /etc/letsencrypt/live/{primary_domain}/")
+        self._print_info("A renovação automática foi configurada para ocorrer diariamente às 3h da manhã.")
+        
+        if self._ask("Deseja adicionar outro certificado para diferentes domínios?"):
+            self.configure_ssl_certificate()
+    else:
+        self._print_info("Configuração do certificado SSL ignorada.")
 
     def disable_services(self):
         self._print_header("Desativação de Serviços Desnecessários")
